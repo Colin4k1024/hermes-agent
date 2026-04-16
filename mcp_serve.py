@@ -865,3 +865,46 @@ def run_mcp_server(verbose: bool = False) -> None:
         asyncio.run(_run())
     except KeyboardInterrupt:
         bridge.stop()
+
+
+def run_sse_server(host: str = "localhost", port: int = 3000, verbose: bool = False) -> None:
+    """Start the Hermes MCP server over SSE (HTTP).
+
+    The server will listen on http://{host}:{port}/sse for MCP connections.
+
+    Args:
+        host: Host to bind to (default "localhost")
+        port: Port to listen on (default 3000)
+        verbose: Enable debug logging
+    """
+    if not _MCP_SERVER_AVAILABLE:
+        print(
+            "Error: MCP server requires the 'mcp' package.\n"
+            "Install with: pip install 'hermes-agent[mcp]'",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    if verbose:
+        logging.basicConfig(level=logging.DEBUG, stream=sys.stderr)
+    else:
+        logging.basicConfig(level=logging.WARNING, stream=sys.stderr)
+
+    bridge = EventBridge()
+    bridge.start()
+
+    server = create_mcp_server(event_bridge=bridge)
+
+    import asyncio
+
+    async def _run():
+        try:
+            # run_sse_async starts an HTTP server with SSE endpoint
+            await server.run_sse_async(host=host, port=port)
+        finally:
+            bridge.stop()
+
+    try:
+        asyncio.run(_run())
+    except KeyboardInterrupt:
+        bridge.stop()

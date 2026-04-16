@@ -5739,6 +5739,10 @@ Examples:
         "-v", "--verbose", action="store_true",
         help="Enable verbose logging on stderr",
     )
+    mcp_serve_p.add_argument(
+        "--sse", action="store_true",
+        help="Run over SSE (HTTP) instead of stdio. Server will listen on http://localhost:3000/sse",
+    )
 
     mcp_add_p = mcp_sub.add_parser("add", help="Add an MCP server (discovery-first install)")
     mcp_add_p.add_argument("name", help="Server name (used as config key)")
@@ -6145,6 +6149,41 @@ Examples:
             sys.exit(1)
 
     acp_parser.set_defaults(func=cmd_acp)
+
+    # =========================================================================
+    # acp-server command (Phase 2: Hermes-Aetheris integration)
+    # =========================================================================
+    acp_server_parser = subparsers.add_parser(
+        "acp-server",
+        help="Run Hermes ACP Server for Aetheris job dispatch (TCP/HTTP mode)",
+        description="Start Hermes Agent ACP Server in TCP mode to receive job dispatch from Aetheris and send events via HTTP callbacks",
+    )
+    acp_server_parser.add_argument(
+        "--port", "-p",
+        type=int,
+        default=9090,
+        help="TCP port to listen on (default: 9090)",
+    )
+    acp_server_parser.add_argument(
+        "--host",
+        default="0.0.0.0",
+        help="Host to bind to (default: 0.0.0.0)",
+    )
+
+    def cmd_acp_server(args):
+        """Launch Hermes Agent ACP Server for Aetheris integration."""
+        try:
+            from acp_adapter.acp_server_entry import main as acp_server_main
+            acp_server_main(host=args.host, port=args.port)
+        except ImportError as e:
+            print(f"ACP server dependencies not installed: {e}")
+            print("Install them with:  pip install -e '.[acp]'")
+            sys.exit(1)
+        except Exception as e:
+            print(f"Failed to start ACP server: {e}")
+            sys.exit(1)
+
+    acp_server_parser.set_defaults(func=cmd_acp_server)
 
     # =========================================================================
     # profile command
