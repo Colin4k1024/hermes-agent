@@ -16,6 +16,7 @@ Key design decisions:
 
 import json
 import logging
+import os
 import random
 import re
 import sqlite3
@@ -1236,3 +1237,60 @@ class SessionDB:
             return len(session_ids)
 
         return self._execute_write(_do)
+
+    # =========================================================================
+    # Checkpoint / Resume (Phase 3)
+    # =========================================================================
+
+    def save_checkpoint(self, job_id: str, step_id: str, state: Dict[str, Any]) -> Optional[str]:
+        """Save a checkpoint for a job/step with session state.
+
+        Args:
+            job_id: Aetheris job/run ID
+            step_id: Current step ID
+            state: Session state to checkpoint (history, model config, etc.)
+
+        Returns:
+            Checkpoint ID if saved successfully, None otherwise
+        """
+        checkpoint_id = f"cp_{job_id}_{step_id}_{int(time.time() * 1000)}"
+        state_json = json.dumps(state)
+
+        try:
+            # Import here to avoid circular imports
+            from acp_adapter.callback_client import CallbackClient
+
+            # Try to get the callback URL from environment or default
+            callback_url = os.environ.get("AETHERIS_CALLBACK_URL", "http://localhost:8080")
+            callback = CallbackClient(callback_url)
+
+            # Run in sync context using asyncio.run
+            import asyncio
+            success = asyncio.run(callback.send_checkpoint_v2(
+                session_id=state.get("session_id", ""),
+                run_id=job_id,
+                step_id=step_id,
+                state_json=state_json,
+            ))
+            return checkpoint_id if success else None
+        except Exception as e:
+            logger.warning("Failed to save checkpoint for job %s: %s", job_id, e)
+            return None
+
+    def load_checkpoint(self, job_id: str) -> Optional[Dict[str, Any]]:
+        """Load a checkpoint for a job.
+
+        Note: This is a placeholder. In Phase 3, checkpoints are stored in
+        Aetheris and retrieved via the event store. This method would query
+        Aetheris for the latest checkpoint for the given job.
+
+        Args:
+            job_id: Aetheris job/run ID
+
+        Returns:
+            Session state dict if checkpoint found, None otherwise
+        """
+        # In Phase 3, checkpoints are managed by Aetheris Event Store
+        # This would need to query Aetheris for the checkpoint
+        logger.debug("Load checkpoint requested for job %s (no-op in Phase 3)", job_id)
+        return None

@@ -371,6 +371,41 @@ class CallbackClient:
             logger.error("Failed to save checkpoint for job %s: %s", job_id, e)
             return False
 
+    async def send_checkpoint_v2(
+        self,
+        session_id: str,
+        run_id: str,
+        step_id: str,
+        state_json: str,
+    ) -> bool:
+        """Send checkpoint data to Aetheris (Phase 3 version).
+
+        Args:
+            session_id: Hermes session ID
+            run_id: Aetheris run/job ID
+            step_id: Current step ID
+            state_json: JSON-encoded session state
+
+        Returns:
+            True if checkpoint was saved successfully, False otherwise
+        """
+        import json
+        payload = {
+            "job_id": run_id,
+            "session_id": session_id,
+            "step_id": step_id,
+            "state": json.loads(state_json) if isinstance(state_json, str) else state_json,
+            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        }
+
+        try:
+            result = await self._post("/api/acp/checkpoints", payload)
+            logger.debug("Checkpoint saved for run %s, step %s", run_id, step_id)
+            return result.get("status") == "ok"
+        except CallbackError as e:
+            logger.error("Failed to save checkpoint for run %s: %s", run_id, e)
+            return False
+
     async def get_job_status(
         self,
         job_id: str,

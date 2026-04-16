@@ -69,8 +69,9 @@ class HermesJobState:
     callback_url: str
     context: Dict[str, Any]
     allowed_tools: List[str]
-    status: str = "pending"  # pending, running, completed, failed, canceled
+    status: str = "pending"  # pending, running, completed, failed, canceled, parked
     cancel_event: Optional[Any] = None  # asyncio.Event
+    resume_event: Optional[Any] = None  # asyncio.Event for job.resume
 
 
 class HermesJobHandler:
@@ -252,6 +253,13 @@ class HermesJobHandler:
                     call_id = str(uuid.uuid4())
                     async with tool_call_lock:
                         tool_call_ids[name] = call_id
+
+                    # Check if this is an approval tool
+                    is_approval = name and name.lower() in (
+                        "approval_request", "approval_callback", "request_approval",
+                        "human_approval", "confirm_action"
+                    )
+
                     await callback.send_tool_call(
                         job_id=job_state.job_id,
                         session_id=job_state.session_id,
@@ -259,6 +267,11 @@ class HermesJobHandler:
                         tool_name=name,
                         arguments=args if isinstance(args, dict) else {"raw": str(args)},
                     )
+
+                    # If approval tool, set job to parked status
+                    if is_approval:
+                        job_state.status = "parked"
+                        logger.info("Job %s parked for approval: %s", job_state.job_id, name)
                 return on_tool_progress
 
             def make_result_callback():
@@ -279,6 +292,8 @@ class HermesJobHandler:
                                 tool_name=tool_name,
                                 result=str(result) if result is not None else None,
                             )
+                    # Send checkpoint after tool completion
+                    self._send_checkpoint(job_state, state)
                 return on_step
 
             # Set callbacks on agent
@@ -431,3 +446,65 @@ class HermesJobHandler:
                 job.cancel_event.set()
             job.status = "canceled"
             return True
+
+    async def handle_job_resume(self, job_id: str) -> Dict[str, Any]:
+        """Handle job.resume message to resume a parked job.
+
+        Args:
+            job_id: The job ID to resume
+
+        Returns:
+            Response dict with status
+        """
+        async with self._jobs_lock:
+            job = self._active_jobs.get(job_id)
+            if job is None:
+                return {
+                    "error": "job_not_found",
+                    "message": f"Job {job_id} not found or not in parked state",
+                }
+
+        # Try to load checkpoint
+        try:
+            from hermes_state import SessionDB
+            db = SessionDB()
+            checkpoint_state = db.load_checkpoint(job_id)
+            if checkpoint_state:
+                # Restore session state
+                session_manager = self._get_session_manager()
+                state = session_manager.get_session(job.session_id)
+                if state and checkpoint_state.get("history"):
+                    state.history = checkpoint_state.get("history", [])
+                    session_manager.save_session(job.session_id)
+        except Exception as e:
+            logger.warning("Failed to load checkpoint for job %s: %s", job_id, e)
+
+        # Signal resume
+        if job.resume_event:
+            job.resume_event.set()
+        job.status = "running"
+
+        return {
+            "status": "resumed",
+            "job_id": job_id,
+            "message": "Job resumed successfully",
+        }
+
+    def _send_checkpoint(self, job_state: HermesJobState, session_state: Any) -> None:
+        """Send checkpoint to Aetheris.
+
+        Args:
+            job_state: The job state
+            session_state: The session state to checkpoint
+        """
+        try:
+            from hermes_state import SessionDB
+            db = SessionDB()
+            checkpoint_state = {
+                "session_id": job_state.session_id,
+                "history": session_state.history if hasattr(session_state, "history") else [],
+                "status": job_state.status,
+            }
+            db.save_checkpoint(job_state.job_id, job_state.step_id or "unknown", checkpoint_state)
+        except Exception as e:
+            logger.warning("Failed to send checkpoint for job %s: %s", job_state.job_id, e)

@@ -103,6 +103,24 @@ async def handle_ping(request: web.Request) -> web.Response:
     return web.json_response({"type": "pong"})
 
 
+async def handle_job_resume(request: web.Request) -> web.Response:
+    """Handle POST /api/acp/jobs/:job_id/resume - resume a parked job."""
+    job_id = request.match_info.get("job_id")
+    if not job_id:
+        return web.json_response(
+            {"error": "invalid_request", "message": "Missing job_id"},
+            status=400,
+        )
+
+    handler = request.app["job_handler"]
+    result = await handler.handle_job_resume(job_id)
+
+    if "error" in result:
+        return web.json_response(result, status=400)
+
+    return web.json_response(result)
+
+
 def create_app(job_handler) -> web.Application:
     """Create and configure the aiohttp application."""
     app = web.Application()
@@ -111,6 +129,7 @@ def create_app(job_handler) -> web.Application:
     # Routes for Aetheris -> Hermes communication
     app.router.add_post("/api/acp/jobs", handle_job_dispatch)
     app.router.add_get("/api/acp/jobs/{job_id}/status", handle_job_status)
+    app.router.add_post("/api/acp/jobs/{job_id}/resume", handle_job_resume)
 
     # Routes for Hermes -> Aetheris callbacks (mostly for testing/compatibility)
     app.router.add_post("/api/acp/events", handle_events)
