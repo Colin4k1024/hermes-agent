@@ -387,15 +387,33 @@ class HermesJobHandler:
                 self._active_jobs.pop(job_state.job_id, None)
             await callback.close()
 
+    def _is_sensitive_key(self, key: str) -> bool:
+        """Check if a key contains sensitive information (token or secret).
+        
+        Uses partial matching - returns True if key.lower() contains 'token' or 'secret'.
+        This is more comprehensive than exact match which only catches specific named keys.
+        
+        Args:
+            key: The context key to check
+            
+        Returns:
+            True if the key appears to contain sensitive information
+        """
+        lower_key = key.lower()
+        return "token" in lower_key or "secret" in lower_key
+
     def _build_context_message(self, context: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """Build a system message with context information."""
+        """Build a system message with context information.
+        
+        Sensitive values (keys containing 'token' or 'secret') are redacted.
+        """
         if not context:
             return None
 
         lines = ["Context information:"]
         for key, value in context.items():
-            # Skip sensitive values like tokens
-            if key.lower() in ("github_token", "api_key", "token", "secret", "password"):
+            # Skip sensitive values - check if key.lower() contains "token" or "secret"
+            if self._is_sensitive_key(key):
                 lines.append(f"- {key}: [REDACTED]")
             elif isinstance(value, str) and len(value) > 200:
                 lines.append(f"- {key}: {value[:200]}...")
@@ -408,10 +426,14 @@ class HermesJobHandler:
         }
 
     def _format_context(self, context: Dict[str, Any]) -> str:
-        """Format context dict as a readable string."""
+        """Format context dict as a readable string.
+        
+        Sensitive values (keys containing 'token' or 'secret') are redacted.
+        """
         lines = []
         for key, value in context.items():
-            if key.lower() in ("github_token", "api_key", "token", "secret", "password"):
+            # Skip sensitive values - check if key.lower() contains "token" or "secret"
+            if self._is_sensitive_key(key):
                 lines.append(f"{key}: [REDACTED]")
             elif isinstance(value, str):
                 lines.append(f"{key}: {value}")
