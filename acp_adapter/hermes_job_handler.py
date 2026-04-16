@@ -182,9 +182,14 @@ class HermesJobHandler:
         # Send session.start event
         await callback.send_session_start(job_id=job_id, session_id=session_id)
 
-        # Run the job asynchronously
-        asyncio.create_task(
+        # Run the job asynchronously and track the task so we can log if it dies
+        task = asyncio.create_task(
             self._run_job(job_state, dispatch.instruction, dispatch.tools, dispatch.context)
+        )
+        task.add_done_callback(
+            lambda t: logger.error("job %s task died with: %s", job_state.job_id, t.exception())
+            if t.cancelled() or (t.exception() is not None)
+            else None
         )
 
         return {
@@ -329,15 +334,20 @@ class HermesJobHandler:
 
             result = await loop.run_in_executor(_executor, run_agent)
 
-            # Determine final status
-            if job_state.cancel_event and job_state.cancel_event.is_set():
+            # Defensive: guard against None result
+            if result is None:
+                result = {}
+                final_status = "failed"
+                final_response = "Agent returned no result"
+            elif job_state.cancel_event and job_state.cancel_event.is_set():
                 final_status = "canceled"
+                final_response = result.get("final_response", "")
             elif "error" in str(result.get("final_response", "")).lower():
                 final_status = "failed"
+                final_response = result.get("final_response", "")
             else:
                 final_status = "completed"
-
-            final_response = result.get("final_response", "")
+                final_response = result.get("final_response", "")
 
             # Save session
             if result.get("messages"):

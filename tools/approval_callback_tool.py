@@ -21,8 +21,9 @@ from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
-# Global registry for pending approvals
+# Global registry for pending approvals — guarded by lock for concurrent access
 _pending_approvals: Dict[str, asyncio.Event] = {}
+_pending_lock: asyncio.Lock = asyncio.Lock()
 
 
 class ApprovalError(Exception):
@@ -73,36 +74,43 @@ async def send_approval_request(
 
     # Register pending approval
     approval_event_obj = asyncio.Event()
-    _pending_approvals[approval_id] = approval_event_obj
+    async with _pending_lock:
+        _pending_approvals[approval_id] = approval_event_obj
 
     try:
         # Send approval request to Aetheris
         await callback._post("/api/acp/events", approval_event)
 
         # Wait for approval response (with timeout)
+        timeout_secs = float(os.environ.get("APPROVAL_TIMEOUT_SECONDS", "300"))
         try:
-            await asyncio.wait_for(approval_event_obj.wait(), timeout=300.0)
+            await asyncio.wait_for(approval_event_obj.wait(), timeout=timeout_secs)
         except asyncio.TimeoutError:
-            raise ApprovalError(f"Approval request {approval_id} timed out after 5 minutes")
+            raise ApprovalError(f"Approval request {approval_id} timed out after {timeout_secs} seconds")
 
         # Check approval status (stored in the event)
         # For now, assume approved if we get the signal
         return "approved"
 
     finally:
-        _pending_approvals.pop(approval_id, None)
+        async with _pending_lock:
+            _pending_approvals.pop(approval_id, None)
 
 
 def notify_approval_result(approval_id: str, approved: bool, comment: str = "") -> None:
     """Notify the approval system that a result has been received.
 
     This is called by the ACP handler when Aetheris sends back the approval result.
+    Note: This is a sync function. If called from an async context, use
+    asyncio.run_coroutine_threadsafe to avoid lock contention.
 
     Args:
         approval_id: The approval request ID
         approved: Whether the request was approved
         comment: Optional comment from the approver
     """
+    # Note: can't use async with _pending_lock here (sync context).
+    # Safe because we only .set() on an existing entry — no resize race.
     if approval_id in _pending_approvals:
         _pending_approvals[approval_id].set()
 
