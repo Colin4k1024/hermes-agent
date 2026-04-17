@@ -17,6 +17,10 @@ import type {
   UpdateSkillRequest,
   AuditLog,
   AuditLogResponse,
+  QuotaConfig,
+  QuotaUsage,
+  QuotaDashboard,
+  UpdateQuotaConfigRequest,
 } from '../types';
 
 // ============================================================
@@ -153,6 +157,71 @@ export const auditService = {
     }
     const start = (page - 1) * page_size;
     return { data: filtered.slice(start, start + page_size), total: filtered.length, page, page_size };
+  },
+};
+
+// ============================================================
+// Quota Service
+// ============================================================
+const mockConfigs: QuotaConfig[] = [
+  { id: 'cfg-1', quota_group: 'user', daily_token_limit: 100_000, daily_request_limit: 500, model_allowlist: null, create_time: '2026-03-01T00:00:00Z', update_time: '2026-04-01T10:00:00Z' },
+  { id: 'cfg-2', quota_group: 'power_user', daily_token_limit: 500_000, daily_request_limit: 2000, model_allowlist: null, create_time: '2026-03-01T00:00:00Z', update_time: '2026-04-01T10:00:00Z' },
+  { id: 'cfg-3', quota_group: 'admin', daily_token_limit: -1, daily_request_limit: 9999999, model_allowlist: [], create_time: '2026-03-01T00:00:00Z', update_time: '2026-03-01T00:00:00Z' },
+];
+
+export const quotaService = {
+  async listConfigs(): Promise<QuotaConfig[]> {
+    await delay(300 + Math.random() * 200);
+    return [...mockConfigs];
+  },
+
+  async updateConfig(quota_group: string, req: UpdateQuotaConfigRequest): Promise<QuotaConfig> {
+    await delay(400);
+    const config = mockConfigs.find((c) => c.quota_group === quota_group);
+    if (!config) throw new Error(`Quota config '${quota_group}' not found`);
+    if (req.daily_token_limit !== undefined) config.daily_token_limit = req.daily_token_limit;
+    if (req.daily_request_limit !== undefined) config.daily_request_limit = req.daily_request_limit;
+    if (req.model_allowlist !== undefined) config.model_allowlist = req.model_allowlist;
+    config.update_time = new Date().toISOString();
+    return { ...config };
+  },
+
+  async dashboard(): Promise<QuotaDashboard> {
+    await delay(400 + Math.random() * 200);
+    return {
+      total_users: 47,
+      total_tokens_today: 12_845_320,
+      total_requests_today: 3_847,
+      users_at_limit: 2,
+      top_users: [
+        { user_id: 'u-00001', username: 'zhang.wei', role: 'power_user', quota_group: 'power_user', record_date: '2026-04-16', used_tokens: 480_000, used_requests: 1890, daily_limit: 500_000, usage_percentage: 96 },
+        { user_id: 'u-00002', username: 'wang.fang', role: 'power_user', quota_group: 'power_user', record_date: '2026-04-16', used_tokens: 465_000, used_requests: 1720, daily_limit: 500_000, usage_percentage: 93 },
+        { user_id: 'u-00003', username: 'li.ming', role: 'user', quota_group: 'user', record_date: '2026-04-16', used_tokens: 98_000, used_requests: 490, daily_limit: 100_000, usage_percentage: 98 },
+      ],
+    };
+  },
+
+  async usage(params?: { limit?: number }): Promise<{ data: QuotaUsage[]; total: number }> {
+    await delay(400 + Math.random() * 200);
+    const NAMES2 = ['zhang.wei', 'wang.fang', 'li.ming', 'liu.yang', 'chen.jing', 'yang.fan', 'zhao.lei', 'zhou.lin'];
+    const usage: QuotaUsage[] = Array.from({ length: params?.limit ?? 20 }, (_, i) => {
+      const role = i < 5 ? 'power_user' : i === 5 ? 'admin' : 'user';
+      const group = role === 'admin' ? 'admin' : role === 'power_user' ? 'power_user' : 'user';
+      const limit = group === 'admin' ? -1 : group === 'power_user' ? 500_000 : 100_000;
+      const used = Math.floor(limit * (0.3 + Math.random() * 0.7));
+      return {
+        user_id: `u-${String(i + 1).padStart(5, '0')}`,
+        username: NAMES2[i % NAMES2.length],
+        role,
+        quota_group: group,
+        record_date: '2026-04-16',
+        used_tokens: used,
+        used_requests: Math.floor(used / 300),
+        daily_limit: limit,
+        usage_percentage: limit === -1 ? 0 : Math.round((used / limit) * 100),
+      };
+    });
+    return { data: usage, total: usage.length };
   },
 };
 

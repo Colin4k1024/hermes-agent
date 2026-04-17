@@ -6,6 +6,7 @@ import DashboardPage from './pages/dashboard/DashboardPage';
 import TokenPage from './pages/token/TokenPage';
 import SkillsPage from './pages/skills/SkillsPage';
 import AuditPage from './pages/audit/AuditPage';
+import QuotaConfigPage from './pages/quota/QuotaConfigPage';
 
 export default function App() {
   return (
@@ -18,6 +19,7 @@ export default function App() {
         <Route path="tokens" element={<TokenPage />} />
         <Route path="skills" element={<SkillsPage />} />
         <Route path="audit" element={<AuditPage />} />
+        <Route path="quota" element={<QuotaConfigPage />} />
       </Route>
     </Routes>
   );

@@ -46,6 +46,43 @@ export interface CreateUserRequest {
 // ============================================================
 // Quota / Usage Types
 // ============================================================
+export type QuotaRole = 'admin' | 'power_user' | 'user';
+
+export interface QuotaConfig {
+  id: string;
+  quota_group: string;
+  daily_token_limit: number;
+  daily_request_limit: number;
+  model_allowlist: string[] | null;
+  create_time: string;
+  update_time: string;
+}
+
+export interface QuotaUsage {
+  user_id: string;
+  username: string | null;
+  role: string;
+  quota_group: string;
+  record_date: string;
+  used_tokens: number;
+  used_requests: number;
+  daily_limit: number;
+  usage_percentage: number;
+}
+
+export interface QuotaDashboard {
+  total_users: number;
+  total_tokens_today: number;
+  total_requests_today: number;
+  users_at_limit: number;
+  top_users: QuotaUsage[];
+}
+
+export interface UpdateQuotaConfigRequest {
+  daily_token_limit?: number;
+  daily_request_limit?: number;
+  model_allowlist?: string[] | null;
+}
 export interface DailyUsage {
   date: string;
   input_tokens: number;
