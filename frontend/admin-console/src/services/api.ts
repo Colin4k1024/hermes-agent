@@ -29,7 +29,20 @@ import type {
 const SKILLS_REGISTRY_URL = import.meta.env.VITE_SKILLS_REGISTRY_URL || 'http://localhost:8004';
 const AUTH_SERVICE_URL = import.meta.env.VITE_AUTH_SERVICE_URL || 'http://localhost:8001';
 const ADMIN_API_KEY = import.meta.env.VITE_ADMIN_API_KEY || '';
-const ADMIN_TOKEN = import.meta.env.VITE_ADMIN_TOKEN || '';
+
+// ============================================================
+// JWT Auth Helper
+// ============================================================
+export function getAuthHeaders(): Record<string, string> {
+  const token = localStorage.getItem('hermes_token');
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+  return headers;
+}
 
 // ============================================================
 // HTTP Helpers
@@ -96,10 +109,7 @@ async function skillsDelete(path: string): Promise<void> {
 
 async function authGet<T>(path: string): Promise<T> {
   const res = await fetch(`${AUTH_SERVICE_URL}${path}`, {
-    headers: {
-      'Authorization': `Bearer ${ADMIN_TOKEN}`,
-      'Content-Type': 'application/json',
-    },
+    headers: getAuthHeaders(),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
