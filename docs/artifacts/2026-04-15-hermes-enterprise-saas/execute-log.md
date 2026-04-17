@@ -150,19 +150,25 @@ status: completed
 
 ---
 
-## 第二梯队待办
+## 第二梯队执行记录
 
-| 工作项 | Owner |
-|--------|-------|
-| 真实 OIDC / Keycloak 对接 | backend-engineer |
-| 真实 LLM 模型配置 | backend-engineer |
-| Skills 管理页面（Admin Console Phase 2）| frontend-engineer |
-| 审计日志页面 | frontend-engineer |
-| K8s 生产部署清单 | devops |
-| NAS NFS v4 验证 | devops |
-| 端到端联调测试 | QA |
+| 工作项 | Owner | 状态 | 完成时间 |
+|--------|-------|------|---------|
+| 真实 OIDC / Keycloak 对接 | backend-engineer | ✅ 完成 | 2026-04-17 |
+| 真实 LLM 模型配置 | backend-engineer | ✅ 完成 | 2026-04-17 |
+| Skills 管理页面（Admin Console Phase 2）| frontend-engineer | ✅ 完成 | 2026-04-17 |
+| 审计日志页面 | frontend-engineer | ✅ 完成 | 2026-04-17 |
+| K8s 生产部署清单 | devops | ✅ 完成 | 2026-04-17 |
+| NAS NFS v4 验证 | devops | ✅ 完成（验证文档）| 2026-04-17 |
+| 端到端联调测试（E2E）| QA | ⬜ 待执行 | — |
+| A-1 Critical 修复（verify_password 重复定义）| backend-engineer | ✅ 完成 | 2026-04-17 |
+| JWT 过期测试覆盖 | backend-engineer | ✅ 完成 | 2026-04-17 |
+| Skills Router 单元测试 | backend-engineer | ✅ 完成 | 2026-04-17 |
+| Admin Console JWT 路由守卫 | frontend-engineer | ✅ 完成 | 2026-04-17 |
+| Phase 2 后台服务间调用（Router→Auth, Quota→Auth, NAS shard）| backend-engineer | ✅ 完成 | 2026-04-17 |
 
 ---
 
 *创建日期: 2026-04-16*
+*最后更新: 2026-04-17*
 *tech-lead: AI Lab User1-1*
