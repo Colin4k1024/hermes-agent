@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: hermes-platform
+  labels:
+    app: hermes
+    tier: platform
+    environment: production

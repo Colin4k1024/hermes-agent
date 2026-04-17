@@ -14,6 +14,7 @@ import {
   Card,
   Tooltip,
   Badge,
+  Spin,
 } from 'antd';
 import {
   PlusOutlined,
@@ -25,7 +26,7 @@ import {
 import type { ColumnsType } from 'antd/es/table';
 import { useRequest } from '../../hooks/useRequest';
 import { skillService } from '../../services/api';
-import type { SkillSummary, CreateSkillRequest } from '../../types';
+import type { SkillSummary, SkillDetail, CreateSkillRequest, UpdateSkillRequest } from '../../types';
 
 const { Title, Text } = Typography;
 
@@ -49,11 +50,23 @@ export default function SkillsPage() {
   const [pageSize] = useState(10);
   const [statusFilter, setStatusFilter] = useState<string | undefined>(undefined);
   const [keyword, setKeyword] = useState('');
+
+  // Create modal
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [createLoading, setCreateLoading] = useState(false);
+
+  // Edit modal
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [editSkill, setEditSkill] = useState<SkillSummary | null>(null);
+  const [editLoading, setEditLoading] = useState(false);
+  const [editSkillMd, setEditSkillMd] = useState('');
+
+  // View modal
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
-  const [viewSkill, setViewSkill] = useState<SkillSummary | null>(null);
+  const [viewSkill, setViewSkill] = useState<SkillDetail | null>(null);
+
   const [form] = Form.useForm();
-  const [formValues, setFormValues] = useState<Record<string, string>>({});
+  const [editForm] = Form.useForm();
 
   const { data, loading, run } = useRequest(skillService.list, {
     defaultParams: [{ status: statusFilter, keyword }],
@@ -65,26 +78,76 @@ export default function SkillsPage() {
   }, [run, statusFilter, keyword]);
 
   const handleCreate = async (values: Record<string, string>) => {
+    setCreateLoading(true);
     try {
       const tags = values.tags
         ? values.tags.split(',').map((t) => t.trim()).filter(Boolean)
         : [];
+      const skillMd = values.skill_md || SAMPLE_SKILL_MD
+        .replace('\${name}', values.name)
+        .replace('\${description}', values.description || '')
+        .replace('\${author}', values.author || '')
+        .replace('\${tags}', tags.join(', '));
+
       const req: CreateSkillRequest = {
         name: values.name,
         description: values.description,
         published_by: values.author,
         tags,
-        skill_md: SAMPLE_SKILL_MD,
+        skill_md: skillMd,
       };
       await skillService.create(req);
       message.success(`Skill '${values.name}' 创建成功`);
       setIsCreateModalOpen(false);
       form.resetFields();
-      setFormValues({});
       setPage(1);
       reload();
-    } catch {
-      message.error('创建失败');
+    } catch (err) {
+      message.error(`创建失败: ${err instanceof Error ? err.message : err}`);
+    } finally {
+      setCreateLoading(false);
+    }
+  };
+
+  const handleEdit = async (skill: SkillSummary) => {
+    setEditSkill(skill);
+    setEditSkillMd(SAMPLE_SKILL_MD
+      .replace('\${name}', skill.name)
+      .replace('\${description}', skill.description)
+      .replace('\${author}', skill.author || '')
+      .replace('\${tags}', skill.tags.join(', ')));
+    editForm.setFieldsValue({
+      name: skill.name,
+      description: skill.description,
+      author: skill.author,
+      tags: skill.tags.join(', '),
+    });
+    setIsEditModalOpen(true);
+  };
+
+  const handleEditSave = async (values: Record<string, string>) => {
+    if (!editSkill) return;
+    setEditLoading(true);
+    try {
+      const tags = values.tags
+        ? values.tags.split(',').map((t) => t.trim()).filter(Boolean)
+        : [];
+
+      const req: UpdateSkillRequest = {
+        description: values.description,
+        tags,
+        skill_md: values.skill_md || undefined,
+      };
+      await skillService.update(editSkill.name, req);
+      message.success(`Skill '${editSkill.name}' 更新成功`);
+      setIsEditModalOpen(false);
+      editForm.resetFields();
+      setEditSkill(null);
+      reload();
+    } catch (err) {
+      message.error(`更新失败: ${err instanceof Error ? err.message : err}`);
+    } finally {
+      setEditLoading(false);
     }
   };
 
@@ -93,14 +156,19 @@ export default function SkillsPage() {
       await skillService.archive(name);
       message.success(`Skill '${name}' 已归档`);
       reload();
-    } catch {
-      message.error('归档失败');
+    } catch (err) {
+      message.error(`归档失败: ${err instanceof Error ? err.message : err}`);
     }
   };
 
   const handlePreview = async (skill: SkillSummary) => {
-    setViewSkill(skill);
-    setIsViewModalOpen(true);
+    try {
+      const detail = await skillService.get(skill.name);
+      setViewSkill(detail);
+      setIsViewModalOpen(true);
+    } catch (err) {
+      message.error(`加载详情失败: ${err instanceof Error ? err.message : err}`);
+    }
   };
 
   const columns: ColumnsType<SkillSummary> = [
@@ -178,6 +246,7 @@ export default function SkillsPage() {
             type="text"
             size="small"
             icon={<EditOutlined />}
+            onClick={() => handleEdit(record)}
             disabled={record.status === 'archived'}
           />
           {record.status === 'active' && (
@@ -234,35 +303,37 @@ export default function SkillsPage() {
       </div>
 
       <Card style={{ borderRadius: 8 }} bodyStyle={{ padding: 12 }}>
-        <Table
-          columns={columns}
-          dataSource={data?.data}
-          loading={loading}
-          rowKey="name"
-          pagination={{
-            current: page,
-            pageSize,
-            total: data?.total,
-            onChange: setPage,
-            showSizeChanger: false,
-            showTotal: (total) => `共 ${total} 个 Skill`,
-          }}
-        />
+        <Spin spinning={loading}>
+          <Table
+            columns={columns}
+            dataSource={data?.data}
+            loading={loading}
+            rowKey="name"
+            pagination={{
+              current: page,
+              pageSize,
+              total: data?.total,
+              onChange: setPage,
+              showSizeChanger: false,
+              showTotal: (total) => `共 ${total} 个 Skill`,
+            }}
+          />
+        </Spin>
       </Card>
 
       {/* Create Modal */}
       <Modal
         title="新建 Skill"
         open={isCreateModalOpen}
-        onCancel={() => { setIsCreateModalOpen(false); form.resetFields(); setFormValues({}); }}
+        onCancel={() => { setIsCreateModalOpen(false); form.resetFields(); }}
         footer={null}
-        width={560}
+        width={640}
+        destroyOnClose
       >
         <Form
           form={form}
           layout="vertical"
           onFinish={handleCreate}
-          initialValues={formValues}
         >
           <Form.Item
             name="name"
@@ -287,13 +358,80 @@ export default function SkillsPage() {
             <Input placeholder="用逗号分隔，如: devops, github, automation" />
           </Form.Item>
 
+          <Form.Item name="skill_md" label="SKILL.md 内容">
+            <Input.TextArea
+              rows={12}
+              placeholder="输入 SKILL.md 的原始内容（YAML frontmatter + Markdown）"
+              style={{ fontFamily: 'monospace', fontSize: 12 }}
+            />
+          </Form.Item>
+
           <Form.Item style={{ marginBottom: 0 }}>
             <Space style={{ width: '100%', justifyContent: 'flex-end' }}>
-              <Button onClick={() => { setIsCreateModalOpen(false); form.resetFields(); setFormValues({}); }}>
+              <Button onClick={() => { setIsCreateModalOpen(false); form.resetFields(); }}>
                 取消
               </Button>
-              <Button type="primary" htmlType="submit">
+              <Button type="primary" htmlType="submit" loading={createLoading}>
                 创建
+              </Button>
+            </Space>
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      {/* Edit Modal */}
+      <Modal
+        title={`编辑 Skill: ${editSkill?.name}`}
+        open={isEditModalOpen}
+        onCancel={() => { setIsEditModalOpen(false); editForm.resetFields(); setEditSkill(null); }}
+        footer={null}
+        width={720}
+        destroyOnClose
+      >
+        <Form
+          form={editForm}
+          layout="vertical"
+          onFinish={handleEditSave}
+          initialValues={{
+            name: editSkill?.name,
+            description: editSkill?.description,
+            author: editSkill?.author,
+            tags: editSkill?.tags?.join(', '),
+          }}
+        >
+          <Form.Item name="name" label="Skill 名称">
+            <Input disabled />
+          </Form.Item>
+
+          <Form.Item name="description" label="描述">
+            <Input.TextArea rows={2} placeholder="简要描述此 Skill 的功能" />
+          </Form.Item>
+
+          <Form.Item name="author" label="作者">
+            <Input placeholder="admin@corp.example.com" />
+          </Form.Item>
+
+          <Form.Item name="tags" label="标签">
+            <Input placeholder="用逗号分隔，如: devops, github, automation" />
+          </Form.Item>
+
+          <Form.Item name="skill_md" label="SKILL.md 内容">
+            <Input.TextArea
+              rows={16}
+              placeholder="输入 SKILL.md 的原始内容"
+              value={editSkillMd}
+              onChange={(e) => setEditSkillMd(e.target.value)}
+              style={{ fontFamily: 'monospace', fontSize: 12 }}
+            />
+          </Form.Item>
+
+          <Form.Item style={{ marginBottom: 0 }}>
+            <Space style={{ width: '100%', justifyContent: 'flex-end' }}>
+              <Button onClick={() => { setIsEditModalOpen(false); editForm.resetFields(); setEditSkill(null); }}>
+                取消
+              </Button>
+              <Button type="primary" htmlType="submit" loading={editLoading}>
+                保存
               </Button>
             </Space>
           </Form.Item>
@@ -323,6 +461,8 @@ export default function SkillsPage() {
               <div>{viewSkill.tags.map((t) => <Tag key={t}>{t}</Tag>)}</div>
               <Text type="secondary">更新时间：</Text>
               <Text>{new Date(viewSkill.update_time).toLocaleString('zh-CN')}</Text>
+              <Text type="secondary">NAS 路径：</Text>
+              <Text style={{ fontFamily: 'monospace', fontSize: 11 }}>{viewSkill.nas_path}</Text>
             </div>
           </div>
         )}

@@ -1,0 +1,130 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: feishu-bot
+  namespace: hermes-platform
+  labels:
+    app: hermes
+    tier: backend
+    component: feishu-bot
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: hermes
+      component: feishu-bot
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: hermes
+        tier: backend
+        component: feishu-bot
+    spec:
+      serviceAccountName: feishu-bot-sa
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10000
+        runAsGroup: 10000
+        fsGroup: 10000
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: hermes
+                    component: feishu-bot
+                topologyKey: kubernetes.io/hostname
+      containers:
+        - name: feishu-bot
+          image: hermes-feishu-bot:v1.0.0  # TODO: Replace with actual image
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8005
+              name: http
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: quota-service-cm  # Uses same redis config
+          env:
+            - name: FEISHU_APP_ID
+              valueFrom:
+                secretKeyRef:
+                  name: hermes-agent-secret
+                  key: FEISHU_APP_ID
+            - name: FEISHU_APP_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: hermes-agent-secret
+                  key: FEISHU_APP_SECRET
+            - name: REDIS_HOST
+              value: "redis.hermes-platform.svc.cluster.local"
+            - name: AUTH_SERVICE_URL
+              value: "http://auth-service.hermes-platform.svc.cluster.local:8001"
+            - name: ROUTER_SERVICE_URL
+              value: "http://router-service.hermes-platform.svc.cluster.local:8002"
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8005
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8005
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: feishu-bot-pdb
+  namespace: hermes-platform
+  labels:
+    app: hermes
+    component: feishu-bot
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: hermes
+      component: feishu-bot
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: feishu-bot-sa
+  namespace: hermes-platform
+  labels:
+    app: hermes
+    component: feishu-bot

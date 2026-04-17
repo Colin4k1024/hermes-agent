@@ -2,6 +2,8 @@
 Auth Service — Auth Router (Login / Refresh / Logout)
 """
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.responses import HTMLResponse, RedirectResponse
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth_service.database import get_db
@@ -37,20 +39,22 @@ async def login(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    OIDC mock login endpoint.
-    In dev mode: accepts dev@hermes.local / devpassword.
-    In prod: performs OIDC Authorization Code Flow redirect.
+    OIDC mock login endpoint (dev only when OIDC_MOCK_ENABLED=True).
+    In prod: OIDC_MOCK_ENABLED=False redirects to /auth/oidc/login.
     """
+    # Real OIDC: redirect to IdP
+    if not settings.OIDC_MOCK_ENABLED:
+        raise HTTPException(
+            status_code=501,
+            detail="OIDC not configured — redirect to /auth/oidc/login for SSO login",
+        )
+
     # OIDC Mock
-    if settings.OIDC_MOCK_ENABLED:
-        if req.email == settings.OIDC_MOCK_USER_EMAIL and req.password == settings.OIDC_MOCK_USER_PASSWORD:
-            user_id = settings.OIDC_MOCK_USER_ID
-            role = settings.OIDC_MOCK_USER_ROLE
-        else:
-            raise HTTPException(status_code=401, detail="Invalid credentials")
+    if req.email == settings.OIDC_MOCK_USER_EMAIL and req.password == settings.OIDC_MOCK_USER_PASSWORD:
+        user_id = settings.OIDC_MOCK_USER_ID
+        role = settings.OIDC_MOCK_USER_ROLE
     else:
-        # Real OIDC: redirect to IdP
-        raise HTTPException(status_code=501, detail="OIDC not configured")
+        raise HTTPException(status_code=401, detail="Invalid credentials")
 
     # Create tokens
     access_token, expires_in = create_access_token(user_id, role)
@@ -132,3 +136,29 @@ async def logout(
                                    ip_address=request.client.host if request.client else None)
     await db.commit()
     return {"ok": True}
+
+
+@router.get("/login", response_class=HTMLResponse)
+async def login_page(request: Request):
+    """
+    Simple HTML login page for local dev (OIDC_MOCK_ENABLED=True).
+    In prod, users are redirected to /auth/oidc/login for SSO.
+    """
+    html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head><title>Hermes Dev Login</title></head>
+    <body>
+    <h2>Hermes Auth — Dev Mode</h2>
+    <p>Using mock login (OIDC_MOCK_ENABLED=True)</p>
+    <form method="post" action="/auth/login">
+      <label>Email: <input type="email" name="email" value="{settings.OIDC_MOCK_USER_EMAIL}" /></label><br/>
+      <label>Password: <input type="password" name="password" value="{settings.OIDC_MOCK_USER_PASSWORD}" /></label><br/>
+      <button type="submit">Login</button>
+    </form>
+    <hr/>
+    <p>For real OIDC login: <a href="/auth/oidc/login">/auth/oidc/login</a></p>
+    </body>
+    </html>
+    """
+    return html

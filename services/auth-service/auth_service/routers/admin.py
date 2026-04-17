@@ -95,24 +95,69 @@ async def deactivate_user(
 
 @router.get("/audit-logs")
 async def list_audit_logs(
-    limit: int = 50,
-    offset: int = 0,
+    action: Optional[str] = None,
+    user_id: Optional[str] = None,
+    keyword: Optional[str] = None,
+    start_date: Optional[datetime] = None,
+    end_date: Optional[datetime] = None,
+    page: int = 1,
+    page_size: int = 50,
     admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    """Admin: list audit logs."""
-    from sqlalchemy import select, desc
+    """Admin: list audit logs with filters and pagination."""
+    from sqlalchemy import select, desc, func, or_
+
+    query = select(AuditLog)
+    count_query = select(func.count(AuditLog.id))
+
+    if action:
+        query = query.where(AuditLog.event_type == action)
+        count_query = count_query.where(AuditLog.event_type == action)
+    if user_id:
+        query = query.where(AuditLog.user_id == user_id)
+        count_query = count_query.where(AuditLog.user_id == user_id)
+    if keyword:
+        kw_filter = or_(
+            AuditLog.detail.ilike(f"%{keyword}%"),
+            AuditLog.user_id.ilike(f"%{keyword}%"),
+        )
+        query = query.where(kw_filter)
+        count_query = count_query.where(kw_filter)
+    if start_date:
+        query = query.where(AuditLog.created_at >= start_date)
+        count_query = count_query.where(AuditLog.created_at >= start_date)
+    if end_date:
+        query = query.where(AuditLog.created_at <= end_date)
+        count_query = count_query.where(AuditLog.created_at <= end_date)
+
+    total_result = await db.execute(count_query)
+    total = total_result.scalar() or 0
+
+    offset = (page - 1) * page_size
     result = await db.execute(
-        select(AuditLog).order_by(desc(AuditLog.created_at)).offset(offset).limit(limit)
+        query.order_by(desc(AuditLog.created_at)).offset(offset).limit(page_size)
     )
     logs = result.scalars().all()
-    total_result = await db.execute(select(AuditLog.id.count()))
-    total = total_result.scalar()
-    return {"logs": [{
-        "id": log.id,
-        "user_id": log.user_id,
-        "event_type": log.event_type,
-        "ip_address": log.ip_address,
-        "detail": log.detail,
-        "created_at": log.created_at.isoformat(),
-    } for log in logs], "total": total}
+
+    # Map event_type -> action label for frontend compatibility
+    from auth_service.service import get_user_by_id
+    rows = []
+    for log in logs:
+        user_email = ""
+        if log.user_id:
+            user = await get_user_by_id(db, log.user_id)
+            if user:
+                user_email = user.email
+        rows.append({
+            "id": log.id,
+            "user_id": log.user_id or "",
+            "username": user_email,
+            "action": log.event_type,
+            "resource": f"/{log.event_type}",
+            "detail": log.detail or "",
+            "ip": log.ip_address or "",
+            "timestamp": log.created_at.isoformat(),
+        })
+
+    return {"data": rows, "total": total, "page": page, "page_size": page_size}

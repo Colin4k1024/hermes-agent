@@ -1,0 +1,22 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: quota-service-cm
+  namespace: hermes-platform
+  labels:
+    app: hermes
+    tier: backend
+    component: quota-service
+data:
+  QUOTA_SERVICE_HOST: "0.0.0.0"
+  QUOTA_SERVICE_PORT: "8003"
+  QUOTA_SERVICE_DEBUG: "false"
+  POSTGRES_HOST: "postgres.hermes-platform.svc.cluster.local"
+  POSTGRES_PORT: "5432"
+  POSTGRES_USER: "hermes"
+  POSTGRES_DB: "hermes_platform"
+  REDIS_HOST: "redis.hermes-platform.svc.cluster.local"
+  REDIS_PORT: "6379"
+  REDIS_DB: "0"
+  AUTH_SERVICE_URL: "http://auth-service.hermes-platform.svc.cluster.local:8001"
+  LOG_LEVEL: "info"

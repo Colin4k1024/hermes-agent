@@ -1,0 +1,106 @@
+# Agent Sidecar Deployment (Placeholder)
+# ADR-002: Sidecar handles /internal/prepare, /internal/release, /internal/skills/reload
+# This is a placeholder deployment for the sidecar container image.
+# TODO: Implement actual sidecar with FastAPI following ADR-002 specification
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agent-sidecar
+  namespace: hermes-platform
+  labels:
+    app: hermes
+    tier: backend
+    component: agent-sidecar
+spec:
+  replicas: 1  # Sidecar runs as part of hermes-agent pods, this is for the standalone API server
+  selector:
+    matchLabels:
+      app: hermes
+      component: agent-sidecar
+  template:
+    metadata:
+      labels:
+        app: hermes
+        tier: backend
+        component: agent-sidecar
+    spec:
+      serviceAccountName: agent-sidecar-sa
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10000
+        runAsGroup: 10000
+        fsGroup: 10000
+      containers:
+        - name: agent-sidecar
+          image: hermes-agent-sidecar:v1.0.0  # TODO: Replace with actual sidecar image
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 9080
+              name: http
+              protocol: TCP
+          env:
+            - name: SIDECAR_PORT
+              value: "9080"
+            - name: HERMES_HOME_BASE
+              value: "/nas/hermes-homes"
+            - name: REDIS_HOST
+              value: "redis.hermes-platform.svc.cluster.local"
+            - name: REDIS_PORT
+              value: "6379"
+            - name: LOG_LEVEL
+              value: "info"
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 9080
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 9080
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 5
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: agent-sidecar
+  namespace: hermes-platform
+  labels:
+    app: hermes
+    component: agent-sidecar
+spec:
+  type: ClusterIP
+  ports:
+    - port: 9080
+      targetPort: 9080
+      protocol: TCP
+      name: http
+  selector:
+    app: hermes
+    component: agent-sidecar
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: agent-sidecar-sa
+  namespace: hermes-platform
+  labels:
+    app: hermes
+    component: agent-sidecar

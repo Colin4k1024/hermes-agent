@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: admin-console
+  namespace: hermes-platform
+  labels:
+    app: hermes
+    tier: frontend
+    component: admin-console
+spec:
+  type: ClusterIP
+  ports:
+    - port: 80
+      targetPort: 80
+      protocol: TCP
+      name: http
+  selector:
+    app: hermes
+    component: admin-console

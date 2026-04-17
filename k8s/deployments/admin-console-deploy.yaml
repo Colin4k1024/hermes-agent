@@ -1,0 +1,91 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: admin-console
+  namespace: hermes-platform
+  labels:
+    app: hermes
+    tier: frontend
+    component: admin-console
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: hermes
+      component: admin-console
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: hermes
+        tier: frontend
+        component: admin-console
+    spec:
+      serviceAccountName: admin-console-sa
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10100
+        runAsGroup: 10100
+        fsGroup: 10100
+      containers:
+        - name: admin-console
+          image: hermes-admin-console:v1.0.0  # TODO: Replace with actual image
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 80
+              name: http
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: admin-console-cm
+          env:
+            - name: VITE_ADMIN_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: hermes-agent-secret
+                  key: ADMIN_API_KEY
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 15
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: admin-console-sa
+  namespace: hermes-platform
+  labels:
+    app: hermes
+    component: admin-console

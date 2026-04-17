@@ -1,0 +1,116 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: router-service
+  namespace: hermes-platform
+  labels:
+    app: hermes
+    tier: backend
+    component: router-service
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: hermes
+      component: router-service
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: hermes
+        tier: backend
+        component: router-service
+    spec:
+      serviceAccountName: router-service-sa
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10000
+        runAsGroup: 10000
+        fsGroup: 10000
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: hermes
+                    component: router-service
+                topologyKey: kubernetes.io/hostname
+      containers:
+        - name: router-service
+          image: hermes-router-service:v1.0.0  # TODO: Replace with actual image
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8002
+              name: http
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: router-service-cm
+          env:
+            - name: REDIS_HOST
+              value: "redis.hermes-platform.svc.cluster.local"
+          readinessProbe:
+            httpGet:
+              path: /internal/health
+              port: 8002
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /internal/health
+              port: 8002
+            initialDelaySeconds: 45
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 200m
+              memory: 512Mi
+            limits:
+              cpu: 1000m
+              memory: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: router-service-pdb
+  namespace: hermes-platform
+  labels:
+    app: hermes
+    component: router-service
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: hermes
+      component: router-service
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: router-service-sa
+  namespace: hermes-platform
+  labels:
+    app: hermes
+    component: router-service

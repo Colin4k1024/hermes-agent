@@ -1,0 +1,56 @@
+# Kustomize overlay for Hermes Agent Enterprise SaaS Platform
+# Usage: kubectl apply -k k8s/ or kubectl kustomize k8s/
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: hermes-platform
+resources:
+  # Namespace
+  - namespace.yaml
+  # Storage
+  - storageclass.yaml
+  # ConfigMaps
+  - configmaps/auth-service-cm.yaml
+  - configmaps/router-service-cm.yaml
+  - configmaps/quota-service-cm.yaml
+  - configmaps/skills-registry-cm.yaml
+  - configmaps/litellm-cm.yaml
+  - configmaps/admin-console-cm.yaml
+  # Secrets (注：生产环境应使用 SealedSecrets 或外部 secret 管理)
+  - secrets/auth-secret.yaml
+  - secrets/hermes-agent-secret.yaml
+  # Services
+  - services/auth-service-svc.yaml
+  - services/router-service-svc.yaml
+  - services/quota-service-svc.yaml
+  - services/skills-registry-svc.yaml
+  - services/feishu-bot-svc.yaml
+  - services/litellm-svc.yaml
+  - services/admin-console-svc.yaml
+  # Deployments
+  - deployments/auth-service-deploy.yaml
+  - deployments/router-service-deploy.yaml
+  - deployments/quota-service-deploy.yaml
+  - deployments/skills-registry-deploy.yaml
+  - deployments/feishu-bot-deploy.yaml
+  - deployments/litellm-deploy.yaml
+  - deployments/admin-console-deploy.yaml
+  # Ingress
+  - ingress/hermes-ingress.yaml
+  # Hermes Agent Pod Pool
+  - hermes-agent/hermes-agent-deploy.yaml
+  - hermes-agent/hermes-agent-hpa.yaml
+  - hermes-agent/agent-sidecar-deploy.yaml
+  # Jobs
+  - jobs/db-migration-job.yaml
+commonLabels:
+  app: hermes
+  environment: production
+images:
+  # TODO: Replace with actual image URLs
+  # - name: hermes-auth-service
+  #   newName: registry.example.com/hermes/auth-service
+  #   newTag: v1.0.0
+  # - name: hermes-router-service
+  #   newName: registry.example.com/hermes/router-service
+  #   newTag: v1.0.0
+  # ... etc

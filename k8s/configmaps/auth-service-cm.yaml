@@ -1,0 +1,25 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: auth-service-cm
+  namespace: hermes-platform
+  labels:
+    app: hermes
+    tier: backend
+    component: auth-service
+data:
+  AUTH_SERVICE_HOST: "0.0.0.0"
+  AUTH_SERVICE_PORT: "8001"
+  AUTH_SERVICE_DEBUG: "false"
+  POSTGRES_HOST: "postgres.hermes-platform.svc.cluster.local"
+  POSTGRES_PORT: "5432"
+  POSTGRES_USER: "hermes"
+  POSTGRES_DB: "hermes_platform"
+  JWT_ALGORITHM: "HS256"
+  JWT_EXPIRE_MINUTES: "480"
+  OIDC_ISSUER: "https://auth.example.com/realms/hermes"
+  OIDC_CLIENT_ID: "hermes-auth"
+  REDIS_HOST: "redis.hermes-platform.svc.cluster.local"
+  REDIS_PORT: "6379"
+  REDIS_DB: "0"
+  LOG_LEVEL: "info"

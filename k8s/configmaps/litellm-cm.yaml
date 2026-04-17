@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: litellm-cm
+  namespace: hermes-platform
+  labels:
+    app: hermes
+    tier: backend
+    component: litellm-proxy
+data:
+  PORT: "4000"
+  LOG_LEVEL: "info"
+  STORE_MODEL_IN_DB: "false"
+  DATABASE_URL: "sqlite:////tmp/litellm.db"

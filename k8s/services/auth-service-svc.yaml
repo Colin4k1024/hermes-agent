@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: auth-service
+  namespace: hermes-platform
+  labels:
+    app: hermes
+    tier: backend
+    component: auth-service
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8001
+      targetPort: 8001
+      protocol: TCP
+      name: http
+  selector:
+    app: hermes
+    component: auth-service

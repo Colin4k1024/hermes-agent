@@ -24,26 +24,100 @@ import type {
 } from '../types';
 
 // ============================================================
-// Skills Service
+// Environment / Config
 // ============================================================
+const SKILLS_REGISTRY_URL = import.meta.env.VITE_SKILLS_REGISTRY_URL || 'http://localhost:8004';
+const AUTH_SERVICE_URL = import.meta.env.VITE_AUTH_SERVICE_URL || 'http://localhost:8001';
+const ADMIN_API_KEY = import.meta.env.VITE_ADMIN_API_KEY || '';
+const ADMIN_TOKEN = import.meta.env.VITE_ADMIN_TOKEN || '';
 
-// Simulated network delay
-const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
+// ============================================================
+// HTTP Helpers
+// ============================================================
+async function skillsGet<T>(path: string): Promise<T> {
+  const res = await fetch(`${SKILLS_REGISTRY_URL}${path}`, {
+    headers: {
+      'X-Admin-Key': ADMIN_API_KEY,
+      'Content-Type': 'application/json',
+    },
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error((err as { detail?: string }).detail || `HTTP ${res.status}`);
+  }
+  return res.json() as Promise<T>;
+}
 
-const mockSkills: SkillSummary[] = [
-  { name: 'github', description: 'GitHub workflow automation', version: '1.2.0', status: 'active', tags: ['devops', 'github'], author: 'hermes-team', update_time: '2026-04-10T10:00:00Z' },
-  { name: 'jira', description: 'Jira issue management', version: '1.0.3', status: 'active', tags: ['project', 'management'], author: 'hermes-team', update_time: '2026-04-08T14:30:00Z' },
-  { name: 'web-search', description: 'Web search and content extraction', version: '2.1.0', status: 'active', tags: ['search', 'web'], author: 'hermes-team', update_time: '2026-04-12T09:15:00Z' },
-  { name: 'slack-notify', description: 'Send notifications to Slack channels', version: '1.5.0', status: 'active', tags: ['notification', 'slack'], author: 'community', update_time: '2026-04-05T16:45:00Z' },
-  { name: 'data-analysis', description: 'Data analysis and visualization', version: '0.9.0', status: 'active', tags: ['data', 'analysis'], author: 'community', update_time: '2026-04-11T11:20:00Z' },
-  { name: 'legacy-report', description: 'Deprecated legacy reporting skill', version: '0.5.0', status: 'archived', tags: ['deprecated'], author: 'hermes-team', update_time: '2026-03-20T08:00:00Z' },
-];
+async function skillsPost<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetch(`${SKILLS_REGISTRY_URL}${path}`, {
+    method: 'POST',
+    headers: {
+      'X-Admin-Key': ADMIN_API_KEY,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error((err as { detail?: string }).detail || `HTTP ${res.status}`);
+  }
+  return res.json() as Promise<T>;
+}
 
+async function skillsPut<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetch(`${SKILLS_REGISTRY_URL}${path}`, {
+    method: 'PUT',
+    headers: {
+      'X-Admin-Key': ADMIN_API_KEY,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error((err as { detail?: string }).detail || `HTTP ${res.status}`);
+  }
+  return res.json() as Promise<T>;
+}
+
+async function skillsDelete(path: string): Promise<void> {
+  const res = await fetch(`${SKILLS_REGISTRY_URL}${path}`, {
+    method: 'DELETE',
+    headers: {
+      'X-Admin-Key': ADMIN_API_KEY,
+      'Content-Type': 'application/json',
+    },
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error((err as { detail?: string }).detail || `HTTP ${res.status}`);
+  }
+}
+
+async function authGet<T>(path: string): Promise<T> {
+  const res = await fetch(`${AUTH_SERVICE_URL}${path}`, {
+    headers: {
+      'Authorization': `Bearer ${ADMIN_TOKEN}`,
+      'Content-Type': 'application/json',
+    },
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error((err as { detail?: string }).detail || `HTTP ${res.status}`);
+  }
+  return res.json() as Promise<T>;
+}
+
+// ============================================================
+// Skills Service (real API)
+// ============================================================
 export const skillService = {
   async list(params?: { status?: string; keyword?: string }): Promise<SkillListResponse> {
-    await delay(400 + Math.random() * 200);
-    let filtered = [...mockSkills];
-    if (params?.status) filtered = filtered.filter((s) => s.status === params.status);
+    const skills = await skillsGet<SkillSummary[]>('/admin/skills');
+    let filtered = skills;
+    if (params?.status) {
+      filtered = filtered.filter((s) => s.status === params.status);
+    }
     if (params?.keyword) {
       const kw = params.keyword.toLowerCase();
       filtered = filtered.filter(
@@ -54,115 +128,71 @@ export const skillService = {
   },
 
   async get(name: string): Promise<SkillDetail> {
-    await delay(300 + Math.random() * 200);
-    const skill = mockSkills.find((s) => s.name === name);
+    const skills = await skillsGet<SkillSummary[]>('/admin/skills');
+    const skill = skills.find((s) => s.name === name);
     if (!skill) throw new Error(`Skill '${name}' not found`);
     return {
       ...skill,
       id: `skill-${name}`,
       nas_path: `/nas/skills/${name}/SKILL.md`,
-      published_by: 'admin@corp.example.com',
+      published_by: skill.author || null,
       related_skills: [],
       license: 'MIT',
-      create_time: '2026-03-01T00:00:00Z',
+      create_time: skill.update_time,
     };
   },
 
   async create(req: CreateSkillRequest): Promise<SkillResponse> {
-    await delay(500);
-    const newSkill: SkillSummary = {
-      name: req.name,
-      description: req.description ?? '',
-      version: '1.0.0',
-      status: 'active',
-      tags: req.tags ?? [],
-      author: req.published_by ?? '',
-      update_time: new Date().toISOString(),
-    };
-    mockSkills.push(newSkill);
-    return {
-      success: true,
-      skill: { ...newSkill, id: `skill-${req.name}`, nas_path: `/nas/skills/${req.name}/SKILL.md`, published_by: req.published_by ?? null, related_skills: [], license: '', create_time: new Date().toISOString() },
-      message: `Skill '${req.name}' created successfully`,
-    };
+    const result = await skillsPost<SkillResponse>('/admin/skills', req);
+    return result;
   },
 
   async update(name: string, req: UpdateSkillRequest): Promise<SkillResponse> {
-    await delay(400);
-    const skill = mockSkills.find((s) => s.name === name);
-    if (!skill) throw new Error(`Skill '${name}' not found`);
-    if (req.description !== undefined) skill.description = req.description;
-    if (req.tags !== undefined) skill.tags = req.tags;
-    if (req.status !== undefined) skill.status = req.status;
-    skill.update_time = new Date().toISOString();
-    if (req.skill_md) {
-      const versionParts = skill.version.split('.').map(Number);
-      versionParts[2] += 1;
-      skill.version = versionParts.join('.');
-    }
-    return {
-      success: true,
-      skill: { ...skill, id: `skill-${name}`, nas_path: `/nas/skills/${name}/SKILL.md`, published_by: null, related_skills: [], license: '', create_time: '2026-03-01T00:00:00Z' },
-      message: `Skill '${name}' updated to version ${skill.version}`,
-    };
+    const result = await skillsPut<SkillResponse>(`/admin/skills/${encodeURIComponent(name)}`, req);
+    return result;
   },
 
   async archive(name: string): Promise<void> {
-    await delay(300);
-    const skill = mockSkills.find((s) => s.name === name);
-    if (skill) skill.status = 'archived';
+    await skillsDelete(`/admin/skills/${encodeURIComponent(name)}`);
   },
 };
 
 // ============================================================
-// Audit Log Service
+// Audit Log Service (real API via auth-service)
 // ============================================================
-const AUDIT_ACTIONS = ['login', 'logout', 'api_call', 'llm_request', 'token_create', 'token_revoke'] as const;
-const AUDIT_USERS = ['zhang.wei', 'wang.fang', 'li.ming', 'liu.yang', 'chen.jing'];
-const AUDIT_IPS = ['10.0.1.15', '10.0.2.31', '10.0.1.88', '10.0.3.5', '10.0.1.42'];
-
-function generateAuditLogs(count: number, offset = 0): AuditLog[] {
-  return Array.from({ length: count }, (_, i) => {
-    const idx = (offset + i) % 50;
-    const action = AUDIT_ACTIONS[idx % AUDIT_ACTIONS.length];
-    const user = AUDIT_USERS[idx % AUDIT_USERS.length];
-    const daysAgo = Math.floor(idx / 5);
-    const hoursAgo = (idx * 3) % 24;
-    const timestamp = new Date(2026, 3, 16 - daysAgo, hoursAgo, (idx * 7) % 60, (idx * 13) % 60);
-    return {
-      id: `audit-${String(idx + 1).padStart(6, '0')}`,
-      user_id: `u-${String((idx % 5) + 1).padStart(5, '0')}`,
-      username: user,
-      action,
-      resource: action === 'llm_request' ? '/v1/chat/completions' : action === 'api_call' ? '/api/users' : action === 'login' ? '/auth/login' : `/${action.replace('_', '/')}`,
-      detail: action === 'login' ? 'SSO login via Keycloak' : action === 'llm_request' ? `model: claude-3-5-sonnet, tokens: ${1000 + idx * 150}` : `${action} on ${user} at ${timestamp.toISOString()}`,
-      ip: AUDIT_IPS[idx % AUDIT_IPS.length],
-      timestamp: timestamp.toISOString(),
-    };
-  });
-}
-
 export const auditService = {
-  async list(params?: { page?: number; page_size?: number; action?: string; user_id?: string; keyword?: string }): Promise<AuditLogResponse> {
-    await delay(400 + Math.random() * 200);
+  async list(params?: {
+    page?: number;
+    page_size?: number;
+    action?: string;
+    user_id?: string;
+    keyword?: string;
+    start_date?: string;
+    end_date?: string;
+  }): Promise<AuditLogResponse> {
     const page = params?.page ?? 1;
     const page_size = params?.page_size ?? 20;
-    const allLogs = generateAuditLogs(50);
-    let filtered = [...allLogs];
-    if (params?.action) filtered = filtered.filter((l) => l.action === params.action);
-    if (params?.user_id) filtered = filtered.filter((l) => l.user_id === params.user_id);
-    if (params?.keyword) {
-      const kw = params.keyword.toLowerCase();
-      filtered = filtered.filter((l) => l.username.includes(kw) || l.detail.toLowerCase().includes(kw));
-    }
-    const start = (page - 1) * page_size;
-    return { data: filtered.slice(start, start + page_size), total: filtered.length, page, page_size };
+    const searchParams = new URLSearchParams();
+    searchParams.set('page', String(page));
+    searchParams.set('page_size', String(page_size));
+    if (params?.action) searchParams.set('action', params.action);
+    if (params?.user_id) searchParams.set('user_id', params.user_id);
+    if (params?.keyword) searchParams.set('keyword', params.keyword);
+    if (params?.start_date) searchParams.set('start_date', params.start_date);
+    if (params?.end_date) searchParams.set('end_date', params.end_date);
+
+    const result = await authGet<{ data: AuditLog[]; total: number; page: number; page_size: number }>(
+      `/admin/audit-logs?${searchParams.toString()}`
+    );
+    return { ...result, page, page_size };
   },
 };
 
 // ============================================================
-// Quota Service
+// Quota Service (keep mock for now)
 // ============================================================
+const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
 const mockConfigs: QuotaConfig[] = [
   { id: 'cfg-1', quota_group: 'user', daily_token_limit: 100_000, daily_request_limit: 500, model_allowlist: null, create_time: '2026-03-01T00:00:00Z', update_time: '2026-04-01T10:00:00Z' },
   { id: 'cfg-2', quota_group: 'power_user', daily_token_limit: 500_000, daily_request_limit: 2000, model_allowlist: null, create_time: '2026-03-01T00:00:00Z', update_time: '2026-04-01T10:00:00Z' },

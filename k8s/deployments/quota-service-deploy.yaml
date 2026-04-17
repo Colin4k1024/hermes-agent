@@ -1,0 +1,119 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: quota-service
+  namespace: hermes-platform
+  labels:
+    app: hermes
+    tier: backend
+    component: quota-service
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: hermes
+      component: quota-service
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: hermes
+        tier: backend
+        component: quota-service
+    spec:
+      serviceAccountName: quota-service-sa
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10000
+        runAsGroup: 10000
+        fsGroup: 10000
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: hermes
+                    component: quota-service
+                topologyKey: kubernetes.io/hostname
+      containers:
+        - name: quota-service
+          image: hermes-quota-service:v1.0.0  # TODO: Replace with actual image
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8003
+              name: http
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: quota-service-cm
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: auth-secret
+                  key: DATABASE_PASSWORD
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8003
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8003
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: quota-service-pdb
+  namespace: hermes-platform
+  labels:
+    app: hermes
+    component: quota-service
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: hermes
+      component: quota-service
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: quota-service-sa
+  namespace: hermes-platform
+  labels:
+    app: hermes
+    component: quota-service

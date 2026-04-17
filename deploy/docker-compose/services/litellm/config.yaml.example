@@ -1,0 +1,139 @@
+# LiteLLM Proxy Configuration — Production Template
+# =================================================
+# This config provides OpenAI-compatible LLM proxying for the Hermes platform.
+# Supports: OpenAI, Anthropic, Google Gemini, Azure, and custom endpoints.
+#
+# Setup:
+#   1. Copy to config.yaml
+#   2. Set your API keys in environment variables or .env file
+#   3. Restart the litellm service
+#
+# For local dev without API keys, use the litellm-mock service instead.
+
+model_list:
+  # ══════════════════════════════════════════════════════════════
+  # OpenAI Models
+  # ══════════════════════════════════════════════════════════════
+  - model_name: gpt-4o
+    litellm_params:
+      model: openai/gpt-4o
+      api_key: ${OPENAI_API_KEY}
+      api_base: https://api.openai.com/v1
+    router_settings:
+      temperature: 0.7
+      max_tokens: 4096
+
+  - model_name: gpt-4o-mini
+    litellm_params:
+      model: openai/gpt-4o-mini
+      api_key: ${OPENAI_API_KEY}
+      api_base: https://api.openai.com/v1
+    router_settings:
+      temperature: 0.7
+      max_tokens: 4096
+
+  # ══════════════════════════════════════════════════════════════
+  # Anthropic Models
+  # ══════════════════════════════════════════════════════════════
+  - model_name: claude-sonnet-4
+    litellm_params:
+      model: anthropic/claude-sonnet-4-20250514
+      api_key: ${ANTHROPIC_API_KEY}
+      api_base: https://api.anthropic.com/v1
+    router_settings:
+      temperature: 0.7
+      max_tokens: 4096
+
+  - model_name: claude-3-5-sonnet
+    litellm_params:
+      model: anthropic/claude-3-5-sonnet-20241022
+      api_key: ${ANTHROPIC_API_KEY}
+      api_base: https://api.anthropic.com/v1
+    router_settings:
+      temperature: 0.7
+      max_tokens: 4096
+
+  # ══════════════════════════════════════════════════════════════
+  # Google Gemini Models
+  # ══════════════════════════════════════════════════════════════
+  - model_name: gemini-1.5-pro
+    litellm_params:
+      model: gemini/gemini-1.5-pro
+      api_key: ${GOOGLE_API_KEY}
+      api_base: https://generativelanguage.googleapis.com/v1beta
+    router_settings:
+      temperature: 0.7
+      max_tokens: 4096
+
+# ══════════════════════════════════════════════════════════════
+# LiteLLM Settings
+# ══════════════════════════════════════════════════════════════
+litellm_settings:
+  # Drop unsupported request parameters instead of erroring
+  drop_params: true
+
+  # Verbose logging (set via LITELLM_DEBUG env var)
+  set_verbose: ${LITELLM_DEBUG:-false}
+
+  # Request timeout in seconds
+  request_timeout: 600
+
+  # Number of retries on failure
+  num_retries: 3
+
+  # Retry after delay (seconds)
+  retry_after: 3
+
+  # Log level
+  log_level: info
+
+  # JSON structured logs
+  json_logs: false
+
+# ══════════════════════════════════════════════════════════════
+# General Settings
+# ══════════════════════════════════════════════════════════════
+general_settings:
+  # Master key for admin access (REQUIRED - set via LITELLM_MASTER_KEY env var)
+  master_key: ${LITELLM_MASTER_KEY}
+
+  # Database for key management and token tracking
+  # Uses PostgreSQL for production token/lrat tracking
+  database_url: ${DATABASE_URL}
+
+  # OpenTelemetry tracing (enabled by default)
+  otel: true
+
+  # Batch write interval for database writes (seconds)
+  proxy_batch_write_at: 60
+
+  # Health check endpoint
+  health_check_endpoint: /health
+
+# ══════════════════════════════════════════════════════════════
+# Router Settings
+# ══════════════════════════════════════════════════════════════
+router_settings:
+  # Routing strategy: simple-shuffle, latency-based-routing, usage-based-routing
+  routing_strategy: simple-shuffle
+
+  # Redis for caching and rate limiting
+  redis_host: redis
+  redis_port: 6379
+  redis_db: 0
+
+  # Enable pre-call checks (e.g., budget validation)
+  enable_pre_call_checks: false
+
+  # Retries on fallback
+  num_retries: 3
+
+# ══════════════════════════════════════════════════════════════
+# Environment Variables Used
+# ══════════════════════════════════════════════════════════════
+# OPENAI_API_KEY      - OpenAI API key
+# ANTHROPIC_API_KEY   - Anthropic API key
+# GOOGLE_API_KEY      - Google API key
+# LITELLM_MASTER_KEY  - Admin master key (REQUIRED)
+# DATABASE_URL        - PostgreSQL connection string
+# LITELLM_DEBUG       - Enable verbose debugging (true/false)

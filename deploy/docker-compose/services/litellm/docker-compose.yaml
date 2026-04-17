@@ -1,0 +1,69 @@
+# LiteLLM Proxy Service — Production
+# ====================================
+# OpenAI-compatible LLM proxy with multi-provider support.
+# Requires valid API keys. For local dev without keys, use litellm-mock profile.
+#
+# Usage:
+#   docker compose --profile litellm up litellm
+#   Or include in main compose: docker compose up
+
+services:
+  litellm:
+    image: ghcr.io/berriai/litellm:main
+    container_name: hermes-litellm
+    ports:
+      - "4000:4000"  # Proxy API
+      - "4001:4001"  # LiteLLM UI (optional)
+    environment:
+      # Admin master key (REQUIRED - set strong random value in production)
+      - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY}
+
+      # Database for key management and token tracking
+      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://hermes:hermes@postgres:5432/hermes_platform}
+
+      # Redis for caching and rate limiting
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_DB=0
+
+      # LiteLLM Settings
+      - LITELLM_DEBUG=${LITELLM_DEBUG:-false}
+      - LITELLM_REQUEST_TIMEOUT=600
+      - LITELLM_NUM_RETRIES=3
+      - LITELLM_DROP_PARAMS=true
+
+      # API Keys (loaded from env or .env file)
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+
+      # OpenTelemetry
+      - OTEL=true
+      - OTEL_EXPORTER=otlp
+      - OTEL_ENDPOINT=http://otel-collector:4317
+
+      # Logging
+      - LOG_LEVEL=info
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:4000/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    networks:
+      - hermes-network
+    restart: unless-stopped
+    profiles:
+      - litellm  # Only starts with: docker compose --profile litellm up
+
+networks:
+  hermes-network:
+    external: true
+    name: hermes-dev-network

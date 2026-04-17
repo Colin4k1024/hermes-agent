@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: admin-console-cm
+  namespace: hermes-platform
+  labels:
+    app: hermes
+    tier: frontend
+    component: admin-console
+data:
+  VITE_API_BASE_URL: "/auth"
+  VITE_AUTH_SERVICE_URL: "http://auth-service.hermes-platform.svc.cluster.local:8001"
+  VITE_SKILLS_REGISTRY_URL: "http://skills-registry.hermes-platform.svc.cluster.local:8004"

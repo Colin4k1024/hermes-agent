@@ -1,0 +1,21 @@
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: nfs-hermes-per-user
+  labels:
+    app: hermes
+    tier: storage
+  annotations:
+    storageclass.kubernetes.io/is-default-class: "false"
+provisioner: cluster.local/nfs-subdir-external-provisioner
+parameters:
+  pathPattern: "/hermes-homes/${namespace}/${pvcName}"
+  onDelete: "retire"
+reclaimPolicy: Retain
+volumeBindingMode: Immediate
+allowVolumeExpansion: true
+mountOptions:
+  - vers=4.1
+  - noatime
+  - rsize=1048576
+  - wsize=1048576

@@ -18,8 +18,12 @@ class Settings(BaseSettings):
     JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     JWT_REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 
-    # OIDC Mock (dev only)
-    OIDC_MOCK_ENABLED: bool = True
+    # OIDC (Keycloak)
+    OIDC_ISSUER: str = "http://localhost:8880/realms/hermes"
+    OIDC_CLIENT_ID: str = "hermes-auth"
+    OIDC_CLIENT_SECRET: str = "hermes-secret"
+    OIDC_REDIRECT_URI: str = "http://localhost:8001/auth/oidc/callback"
+    OIDC_MOCK_ENABLED: bool = True  # Dev fallback only
     OIDC_MOCK_USER_EMAIL: str = "dev@hermes.local"
     OIDC_MOCK_USER_PASSWORD: str = "devpassword"
     OIDC_MOCK_USER_ID: str = "dev-user-001"

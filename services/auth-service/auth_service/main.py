@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from auth_service.config import settings
 from auth_service.database import init_db
 from auth_service.redis_client import check_redis, close_redis
-from auth_service.routers import auth_router, users_router, tokens_router, internal_router, admin_router
+from auth_service.routers import auth_router, users_router, tokens_router, internal_router, admin_router, oidc_router
 from auth_service.schemas import HealthResponse
 
 
@@ -47,6 +47,7 @@ app.include_router(users_router)
 app.include_router(tokens_router)
 app.include_router(internal_router)
 app.include_router(admin_router)
+app.include_router(oidc_router)
 
 
 @app.get("/")

@@ -1,0 +1,22 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: skills-registry-cm
+  namespace: hermes-platform
+  labels:
+    app: hermes
+    tier: backend
+    component: skills-registry
+data:
+  SKILLS_REGISTRY_HOST: "0.0.0.0"
+  SKILLS_REGISTRY_PORT: "8004"
+  SKILLS_REGISTRY_DEBUG: "false"
+  POSTGRES_HOST: "postgres.hermes-platform.svc.cluster.local"
+  POSTGRES_PORT: "5432"
+  POSTGRES_USER: "hermes"
+  POSTGRES_DB: "hermes_platform"
+  REDIS_HOST: "redis.hermes-platform.svc.cluster.local"
+  REDIS_PORT: "6379"
+  REDIS_DB: "0"
+  SKILLS_REGISTRY_SKILLS_STORAGE_PATH: "/nas/org-skills"
+  LOG_LEVEL: "info"

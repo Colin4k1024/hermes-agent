@@ -16,6 +16,7 @@ class User(Base):
     password_hash = Column(String(255), nullable=False)
     role = Column(String(32), default="user", nullable=False)  # user / power_user / admin
     feishu_union_id = Column(String(128), unique=True, nullable=True, index=True)
+    keycloak_sub = Column(String(128), unique=True, nullable=True, index=True)
     is_active = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)

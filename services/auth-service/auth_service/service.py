@@ -110,3 +110,50 @@ async def get_user_by_id(db: AsyncSession, user_id: str) -> Optional[User]:
 async def get_user_by_email(db: AsyncSession, email: str) -> Optional[User]:
     result = await db.execute(select(User).where(User.email == email))
     return result.scalar_one_or_none()
+
+
+async def get_user_by_keycloak_sub(db: AsyncSession, keycloak_sub: str) -> Optional[User]:
+    result = await db.execute(select(User).where(User.keycloak_sub == keycloak_sub))
+    return result.scalar_one_or_none()
+
+
+async def provision_user_from_oidc(
+    db: AsyncSession,
+    keycloak_sub: str,
+    email: str,
+    username: str,
+    roles: list[str],
+) -> User:
+    """
+    Provision or update a user from OIDC/Keycloak claims.
+    Creates a new user if none exists (upsert by keycloak_sub).
+    """
+    import uuid
+
+    # Try to find existing user by keycloak_sub
+    user = await get_user_by_keycloak_sub(db, keycloak_sub)
+
+    if user is None:
+        # Check if a user with this email already exists (unclaimed)
+        user = await get_user_by_email(db, email)
+        if user is not None:
+            # Claim this existing user
+            user.keycloak_sub = keycloak_sub
+        else:
+            # Create brand new user
+            user = User(
+                id=str(uuid.uuid4()),
+                email=email,
+                password_hash=hash_password(str(uuid.uuid4())),  # Placeholder - no password login
+                role="admin" if "admin" in roles else "user",
+                keycloak_sub=keycloak_sub,
+                is_active=True,
+            )
+            db.add(user)
+    else:
+        # Update existing user claims
+        user.email = email
+        user.role = "admin" if "admin" in roles else "user"
+
+    await db.flush()
+    return user
