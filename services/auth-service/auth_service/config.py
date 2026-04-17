@@ -41,6 +41,9 @@ class Settings(BaseSettings):
     # Admin
     ADMIN_API_KEY: Optional[str] = None  # For admin endpoints
 
+    # Internal API key for inter-service communication
+    INTERNAL_API_KEY: str = "dev-internal-key-change-in-prod"
+
     # CORS
     CORS_ORIGINS: list[str] = ["http://localhost:3000"]
 

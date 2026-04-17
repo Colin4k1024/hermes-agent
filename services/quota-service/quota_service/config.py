@@ -28,6 +28,9 @@ class Settings(BaseSettings):
     # Admin auth
     admin_api_key: str = "dev-admin-key-change-in-prod"
 
+    # Internal API key for calling other services (e.g., auth-service)
+    internal_api_key: str = "dev-internal-key-change-in-prod"
+
     # Auth Service (for role lookups)
     auth_service_url: str = "http://localhost:8001"
 

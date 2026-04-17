@@ -5,6 +5,7 @@ with the Pod Sidecar /internal/prepare endpoint.
 """
 
 import asyncio
+import hashlib
 import logging
 import time
 from typing import TYPE_CHECKING
@@ -30,6 +31,39 @@ if TYPE_CHECKING:
     from .config import Settings
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Sidecar release helper
+# ---------------------------------------------------------------------------
+
+async def call_sidecar_release(pod_id: str, pod_host: str | None = None) -> bool:
+    """Call the agent sidecar's /internal/release endpoint.
+
+    Signals the pod sidecar to perform a WAL checkpoint and mark the pod
+    as idle in Redis before the router returns it to the idle pool.
+
+    Args:
+        pod_id: The pod identifier.
+        pod_host: Optional sidecar URL. If not provided, defaults to
+            http://{pod_id}:8643 using the configured sidecar port.
+
+    Returns:
+        True if the sidecar returned HTTP 200, False otherwise.
+    """
+    if pod_host is None:
+        pod_host = f"http://{pod_id}:8643"
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(
+                f"{pod_host}/internal/release",
+                headers={"X-Pod-ID": pod_id},
+                json={"pod_id": pod_id, "reason": "idle_recycle"},
+            )
+            return resp.status_code == 200
+    except (httpx.RequestError, httpx.TimeoutException):
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -206,7 +240,7 @@ async def route_request(
         # Step 4: Cold start
         # Get NAS shard from user_id for hermes_home_path construction
         # Default shard "00" — in production, Auth Service provides nas_shard
-        nas_shard = "00"  # TODO: fetch from Auth Service
+        nas_shard = hashlib.sha256(user_id.encode()).hexdigest()[:2]
         hermes_home_path = (
             req.user_id
             if req.user_id.startswith("/")
@@ -335,8 +369,22 @@ async def idle_recycler(interval: int = 60) -> None:
             stale_pods = rc.get_stale_active_pods()
             for pod_id in stale_pods:
                 logger.info("Recycling stale active pod %s", pod_id)
-                # TODO: call Pod /internal/release via Sidecar
-                # In dev mode, just move to idle
+
+                # Get the pod's sidecar address
+                pod_host = rc.get_pod_host(pod_id)
+
+                # Try graceful release via sidecar (WAL checkpoint + idle mark)
+                released = False
+                if pod_host:
+                    released = await call_sidecar_release(pod_id, pod_host)
+
+                if not released:
+                    logger.warning(
+                        "Sidecar release failed for pod %s, forcing recycle",
+                        pod_id,
+                    )
+
+                # Always recycle the pod, even if sidecar call failed
                 rc.add_pod_to_idle(pod_id)
                 rc.delete_pod_health(pod_id)
         except Exception as exc:

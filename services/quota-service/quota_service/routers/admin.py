@@ -12,6 +12,7 @@ from quota_service import schemas as S
 from quota_service.database import get_session
 from quota_service.models import QuotaConfig, UsageRecord
 from quota_service.redis_client import get_redis
+from quota_service.auth_client import auth_client
 
 router = APIRouter(prefix="/admin/quota", tags=["admin"])
 
@@ -101,21 +102,44 @@ async def get_usage(
     result = await session.execute(stmt)
     rows = result.all()
 
-    # TODO: join with users table to get username/role
-    return [
-        S.AdminQuotaUsageResponse(
-            user_id=row.user_id,
-            username=None,
-            role="user",
-            quota_group="user",
-            record_date=from_date,
-            used_tokens=int(row.total_tokens or 0),
-            used_requests=int(row.total_requests or 0),
-            daily_limit=100_000,  # TODO: lookup from config
-            usage_percentage=0.0,
+    # Build response, fetching user info from auth-service and quota config
+    responses = []
+    for row in rows:
+        user_id_str = str(row.user_id)
+
+        # Get user info from auth-service
+        try:
+            user_info = await auth_client.get_user_info(user_id_str)
+            username = user_info.get("email", "unknown")
+            role = user_info.get("role", "user")
+            quota_group = role  # quota_group maps to role
+        except Exception:
+            username = "unknown"
+            role = "user"
+            quota_group = "user"
+
+        # Look up daily_limit from QuotaConfig
+        stmt_cfg = select(QuotaConfig).where(QuotaConfig.quota_group == quota_group)
+        result_cfg = await session.execute(stmt_cfg)
+        quota_cfg = result_cfg.scalar_one_or_none()
+        daily_limit = quota_cfg.daily_token_limit if quota_cfg else 100_000
+        usage_percentage = (int(row.total_tokens or 0) / daily_limit * 100) if daily_limit > 0 else 0.0
+
+        responses.append(
+            S.AdminQuotaUsageResponse(
+                user_id=row.user_id,
+                username=username,
+                role=role,
+                quota_group=quota_group,
+                record_date=from_date,
+                used_tokens=int(row.total_tokens or 0),
+                used_requests=int(row.total_requests or 0),
+                daily_limit=daily_limit,
+                usage_percentage=usage_percentage,
+            )
         )
-        for row in rows
-    ]
+
+    return responses
 
 
 @router.get("/dashboard", response_model=S.AdminDashboardResponse)

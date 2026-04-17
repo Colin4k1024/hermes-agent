@@ -249,6 +249,24 @@ def delete_pod_health(pod_id: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Pod host — sidecar address for /internal/release
+# ---------------------------------------------------------------------------
+
+def get_pod_host(pod_id: str) -> str | None:
+    """Return the sidecar HTTP URL for a pod.
+
+    The sidecar runs on port 8643 (sidecar_base_url_suffix in config).
+    Returns None on Redis error.
+    """
+    try:
+        # Construct sidecar URL: http://{pod_id}:8643
+        # In k8s cluster, DNS resolves pod_id to the pod's cluster service.
+        return f"http://{pod_id}{settings.sidecar_base_url_suffix}"
+    except Exception:
+        return None
+
+
+# ---------------------------------------------------------------------------
 # Pool statistics
 # ---------------------------------------------------------------------------
 

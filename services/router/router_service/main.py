@@ -233,9 +233,21 @@ async def chat_completions(
     """
     user_id = x_user_id
     if not user_id and authorization:
-        # TODO: validate JWT via Auth Service
-        # For now, extract user_id from a simple header
-        pass
+        # Validate JWT via Auth Service
+        try:
+            async with httpx.AsyncClient() as client:
+                resp = await client.get(
+                    "http://auth-service:8001/auth/me",
+                    headers={"Authorization": authorization},
+                    timeout=5.0,
+                )
+                if resp.status_code == 200:
+                    user_data = resp.json()
+                    user_id = user_data.get("id")
+                else:
+                    raise HTTPException(status_code=401, detail="Invalid token")
+        except httpx.RequestError:
+            raise HTTPException(status_code=503, detail="Auth Service unavailable")
 
     if not user_id:
         raise HTTPException(

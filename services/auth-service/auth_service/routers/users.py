@@ -9,6 +9,7 @@ from auth_service.database import get_db
 from auth_service.schemas import UserResponse
 from auth_service.service import verify_jwt, get_user_by_id, get_user_by_feishu_union_id, create_audit_log
 from auth_service.models import User
+from auth_service.config import settings
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -64,4 +65,53 @@ async def get_user_by_feishu_id(
         "email": user.email,
         "role": user.role,
         "feishu_union_id": user.feishu_union_id,
+    }
+
+
+# === Internal endpoints for inter-service communication ===
+_internal_users_router = APIRouter(prefix="/internal/users", tags=["internal"])
+
+
+async def _verify_internal_key(x_internal_api_key: str | None = Header(None)) -> str:
+    """Verify X-Internal-API-Key header for internal service calls."""
+    if x_internal_api_key is None or x_internal_api_key != settings.INTERNAL_API_KEY:
+        raise HTTPException(status_code=401, detail="Invalid or missing internal API key")
+    return x_internal_api_key
+
+
+@_internal_users_router.get("/{user_id}/role")
+async def get_user_role(
+    user_id: str,
+    _key: str = Depends(_verify_internal_key),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Internal API: get user role and quota_group by user_id.
+    Used by quota-service to resolve user roles.
+    """
+    user = await get_user_by_id(db, user_id)
+    if not user:
+        return {"role": "user", "quota_group": "user"}
+    return {
+        "role": user.role,
+        "quota_group": user.role,  # quota_group maps to role in this implementation
+    }
+
+
+@_internal_users_router.get("/{user_id}")
+async def get_user_info(
+    user_id: str,
+    _key: str = Depends(_verify_internal_key),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Internal API: get user info (email, role) by user_id.
+    Used by quota-service admin endpoints.
+    """
+    user = await get_user_by_id(db, user_id)
+    if not user:
+        return {"email": "unknown", "role": "user"}
+    return {
+        "email": user.email,
+        "role": user.role,
     }

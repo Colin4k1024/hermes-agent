@@ -43,14 +43,29 @@ class AuthServiceClient:
         return resp.json()
 
     async def get_user_info(self, user_id: str) -> dict[str, Any]:
-        """Get user info by user_id."""
+        """Get user info by user_id from internal API."""
         client = await self._get_client()
-        resp = await client.get(f"/auth/users/{user_id}")
+        resp = await client.get(
+            f"/internal/users/{user_id}",
+            headers={"X-Internal-API-Key": settings.internal_api_key},
+        )
         if resp.status_code == 404:
             raise AuthServiceError("User not found")
         if resp.status_code != 200:
             raise AuthServiceError(f"Auth service error: {resp.status_code}")
         return resp.json()
+
+    async def get_user_role(self, user_id: str) -> tuple[str, str]:
+        """Get user role and quota_group from internal API. Returns (role, quota_group)."""
+        client = await self._get_client()
+        resp = await client.get(
+            f"/internal/users/{user_id}/role",
+            headers={"X-Internal-API-Key": settings.internal_api_key},
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            return data.get("role", "user"), data.get("quota_group", "user")
+        return "user", "user"
 
 
 auth_client = AuthServiceClient()

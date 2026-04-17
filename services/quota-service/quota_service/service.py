@@ -13,6 +13,7 @@ from quota_service import schemas as S
 from quota_service.config import settings
 from quota_service.models import QuotaConfig, UsageRecord
 from quota_service.redis_client import check_quota_in_redis, get_daily_usage, increment_daily_usage
+from quota_service.auth_client import auth_client
 
 
 class QuotaInfo(NamedTuple):
@@ -42,13 +43,8 @@ async def resolve_user_quota(
     user_id: UUID,
 ) -> QuotaInfo:
     """Look up the user's role and quota config, merge with Redis hot counter."""
-    # TODO (Phase 2): call Auth Service to get user role
-    # For Phase 1 dev, we look up from local users table via a join.
-    # Since Auth Service owns users, we provide a lightweight user cache here.
-
-    # Default fallback: treat as 'user' role
-    role = "user"
-    quota_group = "user"
+    # Get role and quota_group from Auth Service
+    role, quota_group = await auth_client.get_user_role(str(user_id))
 
     # Query quota config for the role
     stmt = select(QuotaConfig).where(QuotaConfig.quota_group == quota_group)
@@ -182,6 +178,13 @@ async def consume_quota(
 
     await session.flush()
 
+    # Look up the user's daily limit from QuotaConfig
+    role, quota_group = await auth_client.get_user_role(str(user_id))
+    stmt_cfg = select(QuotaConfig).where(QuotaConfig.quota_group == quota_group)
+    result_cfg = await session.execute(stmt_cfg)
+    quota_cfg = result_cfg.scalar_one_or_none()
+    daily_limit = quota_cfg.daily_token_limit if quota_cfg else settings.default_quota_user
+
     return S.QuotaConsumeResponse(
         success=True,
         user_id=user_id,
@@ -190,8 +193,8 @@ async def consume_quota(
         output_tokens=output_tokens,
         total_daily_tokens=new_total_tokens,
         request_count=new_request_count,
-        daily_limit=settings.default_quota_user,  # TODO: lookup from config
-        remaining_tokens=max(0, settings.default_quota_user - new_total_tokens),
+        daily_limit=daily_limit,
+        remaining_tokens=max(0, daily_limit - new_total_tokens),
     )
 
 
