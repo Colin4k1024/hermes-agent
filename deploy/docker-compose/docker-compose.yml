@@ -1,0 +1,376 @@
+# Hermes Agent Enterprise SaaS — Local Development Environment
+# Docker Compose v2
+# Usage: docker compose up --build
+
+services:
+  # ══════════════════════════════════════════════════════════════
+  # Data Layer
+  # ══════════════════════════════════════════════════════════════
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: hermes-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-hermes}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-hermes}
+      POSTGRES_DB: ${POSTGRES_DB:-hermes_platform}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-scripts:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-hermes}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - hermes-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: hermes-redis
+    ports:
+      - "6379:6379"
+    command: redis-server --save 60 1 --loglevel notice --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    networks:
+      - hermes-network
+
+  # ══════════════════════════════════════════════════════════════
+  # Control Plane — Services
+  # ══════════════════════════════════════════════════════════════
+
+  auth-service:
+    build:
+      context: ../../services/auth-service
+      dockerfile: Dockerfile
+      target: dev
+    container_name: hermes-auth-service
+    ports:
+      - "8001:8001"
+    environment:
+      - AUTH_SERVICE_HOST=0.0.0.0
+      - AUTH_SERVICE_PORT=8001
+      - AUTH_SERVICE_DEBUG=true
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=${POSTGRES_USER:-hermes}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-hermes}
+      - POSTGRES_DB=${POSTGRES_DB:-hermes_platform}
+      - JWT_SECRET=${JWT_SECRET:-dev-jwt-secret-change-in-prod}
+      - JWT_ALGORITHM=HS256
+      - JWT_EXPIRE_MINUTES=480
+      - OIDC_ISSUER=${OIDC_ISSUER:-http://localhost:8880/realms/hermes}
+      - OIDC_CLIENT_ID=${OIDC_CLIENT_ID:-hermes-auth}
+      - OIDC_CLIENT_SECRET=${OIDC_CLIENT_SECRET:-dev-secret}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_DB=0
+      - LOG_LEVEL=DEBUG
+    volumes:
+      - ../../services/auth-service:/app:ro
+      - auth_service_data:/app/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8001/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+    networks:
+      - hermes-network
+    restart: unless-stopped
+
+  router-service:
+    build:
+      context: ../../services/router-service
+      dockerfile: Dockerfile
+      target: dev
+    container_name: hermes-router-service
+    ports:
+      - "8002:8002"
+    environment:
+      - ROUTER_HOST=0.0.0.0
+      - ROUTER_PORT=8002
+      - ROUTER_DEBUG=true
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_DB=0
+      - AUTH_SERVICE_URL=http://auth-service:8001
+      - QUOTA_SERVICE_URL=http://quota-service:8003
+      - LLM_PROXY_URL=http://litellm-mock:4000
+      - HERMES_POD_BASE_URL=http://hermes-agent:8642
+      - K8S_ENABLED=false
+      - NAS_BASE_PATH=/nas/hermes-homes
+      - POD_IDLE_TTL_SECONDS=1800
+      - LOG_LEVEL=DEBUG
+    volumes:
+      - ../../services/router-service:/app:ro
+      - router_service_data:/app/data
+    depends_on:
+      redis:
+        condition: service_healthy
+      auth-service:
+        condition: service_healthy
+      quota-service:
+        condition: service_healthy
+      hermes-agent:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8002/internal/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    networks:
+      - hermes-network
+    restart: unless-stopped
+
+  quota-service:
+    build:
+      context: ../../services/quota-service
+      dockerfile: Dockerfile
+      target: dev
+    container_name: hermes-quota-service
+    ports:
+      - "8003:8003"
+    environment:
+      - QUOTA_SERVICE_HOST=0.0.0.0
+      - QUOTA_SERVICE_PORT=8003
+      - QUOTA_SERVICE_DEBUG=true
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=${POSTGRES_USER:-hermes}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-hermes}
+      - POSTGRES_DB=${POSTGRES_DB:-hermes_platform}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_DB=0
+      - AUTH_SERVICE_URL=http://auth-service:8001
+      - LOG_LEVEL=DEBUG
+    volumes:
+      - ../../services/quota-service:/app:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      auth-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8003/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+    networks:
+      - hermes-network
+    restart: unless-stopped
+
+  skills-registry:
+    build:
+      context: ../../services/skills-registry
+      dockerfile: Dockerfile
+      target: dev
+    container_name: hermes-skills-registry
+    ports:
+      - "8004:8004"
+    environment:
+      - SKILLS_REGISTRY_HOST=0.0.0.0
+      - SKILLS_REGISTRY_PORT=8004
+      - SKILLS_REGISTRY_DEBUG=true
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=${POSTGRES_USER:-hermes}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-hermes}
+      - POSTGRES_DB=${POSTGRES_DB:-hermes_platform}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_DB=0
+      - SKILLS_REGISTRY_SKILLS_STORAGE_PATH=/nas/org-skills
+      - SKILLS_REGISTRY_SKILLS_LOCAL_DEV_PATH=/app/dev-skills
+      - SKILLS_REGISTRY_JWT_SECRET=${JWT_SECRET:-dev-jwt-secret-change-in-prod}
+      - SKILLS_REGISTRY_ADMIN_API_KEY=${ADMIN_API_KEY:-dev-admin-key-change-in-prod}
+      - LOG_LEVEL=DEBUG
+    volumes:
+      - ../../services/skills-registry:/app:ro
+      - skills_registry_dev_skills:/app/dev-skills
+      - skills_storage:/nas/org-skills:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8004/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+    networks:
+      - hermes-network
+    restart: unless-stopped
+
+  feishu-bot:
+    build:
+      context: ../../services/feishu-bot
+      dockerfile: Dockerfile
+    container_name: hermes-feishu-bot
+    ports:
+      - "8005:8005"
+    environment:
+      - FEISHU_APP_ID=${FEISHU_APP_ID:-cli_xxxxxxxxxxxxxxxxxx}
+      - FEISHU_APP_SECRET=${FEISHU_APP_SECRET:-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_DB=0
+      - AUTH_SERVICE_URL=http://auth-service:8001
+      - ROUTER_SERVICE_URL=http://router-service:8002
+      - FBOT_INSTANCE_ID=fbp-local-001
+      - LOG_LEVEL=DEBUG
+    volumes:
+      - ../../services/feishu-bot:/app:ro
+    depends_on:
+      redis:
+        condition: service_healthy
+      auth-service:
+        condition: service_healthy
+      router-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8005/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+    networks:
+      - hermes-network
+    restart: unless-stopped
+
+  # ══════════════════════════════════════════════════════════════
+  # LLM Layer — Mock
+  # ══════════════════════════════════════════════════════════════
+
+  litellm-mock:
+    build:
+      context: ./services/litellm-mock
+      dockerfile: Dockerfile
+    container_name: hermes-litellm-mock
+    ports:
+      - "4000:4000"
+    environment:
+      - PORT=4000
+      - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY:-sk-mock-key-change-in-prod}
+      - LOG_LEVEL=info
+      - STORE_MODEL_IN_DB=false
+      - DATABASE_URL=sqlite:////tmp/litellm.db
+    volumes:
+      - ./services/litellm-mock/config.yaml:/app/config.yaml:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:4000/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+    networks:
+      - hermes-network
+    restart: unless-stopped
+
+  # ══════════════════════════════════════════════════════════════
+  # Execution Layer — Hermes Agent (Dev Mode)
+  # ══════════════════════════════════════════════════════════════
+
+  hermes-agent:
+    build:
+      context: ../../.
+      dockerfile: Dockerfile
+    container_name: hermes-agent-pod-001
+    ports:
+      - "8642:8642"
+    environment:
+      - HERMES_HOME=/opt/data
+      - HERMES_UID=${HERMES_UID:-10000}
+      - HERMES_GID=${HERMES_GID:-10000}
+      - API_SERVER_HOST=0.0.0.0
+      - HERMES_API_KEY=${HERMES_API_KEY:-hermes-dev-key}
+      - LOG_LEVEL=INFO
+      - PYTHONUNBUFFERED=1
+      - PLAYWRIGHT_BROWSERS_PATH=/opt/hermes/.playwright
+      # Point to local LLM mock
+      - LLM_PROVIDER=openai
+      - OPENAI_API_BASE=http://litellm-mock:4000
+      - OPENAI_API_KEY=${LITELLM_MASTER_KEY:-sk-mock-key-change-in-prod}
+    volumes:
+      - hermes_dev_data:/opt/data
+      - ../../.:/opt/hermes:ro
+    depends_on:
+      litellm-mock:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8642/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    networks:
+      - hermes-network
+    restart: unless-stopped
+
+  # ══════════════════════════════════════════════════════════════
+  # Optional: Keycloak (OIDC mock for local dev)
+  # ══════════════════════════════════════════════════════════════
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0
+    container_name: hermes-keycloak
+    ports:
+      - "8880:8080"
+    environment:
+      - KC_BOOTSTRAP_ADMIN_USERNAME=admin
+      - KC_BOOTSTRAP_ADMIN_PASSWORD=admin
+      - KC_DB=dev-mem
+    command:
+      - start-dev
+      - --import-realm
+    volumes:
+      - ./services/keycloak:/opt/keycloak/data/havip:ro
+      - keycloak_data:/opt/keycloak/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+    networks:
+      - hermes-network
+    restart: unless-stopped
+    profiles:
+      - with-keycloak
+
+networks:
+  hermes-network:
+    driver: bridge
+    name: hermes-dev-network
+
+volumes:
+  postgres_data:
+  redis_data:
+  auth_service_data:
+  router_service_data:
+  skills_registry_dev_skills:
+  skills_storage:
+  hermes_dev_data:
+  keycloak_data:

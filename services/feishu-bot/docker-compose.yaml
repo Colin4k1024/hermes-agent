@@ -1,0 +1,45 @@
+version: "3.9"
+
+# Local development environment for Feishu Bot Service
+# Run: docker compose up --build
+
+services:
+  feishu-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8005:8005"
+    environment:
+      - FEISHU_APP_ID=${FEISHU_APP_ID:-cli_xxx}
+      - FEISHU_APP_SECRET=${FEISHU_APP_SECRET:-xxx}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - AUTH_SERVICE_URL=http://auth-service:8001
+      - ROUTER_SERVICE_URL=http://router-service:8002
+      - FBOT_INSTANCE_ID=fbp-local-001
+      - LOG_LEVEL=DEBUG
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8005/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    command: redis-server --save 60 1 --loglevel notice
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+networks:
+  default:
+    name: hermes-dev

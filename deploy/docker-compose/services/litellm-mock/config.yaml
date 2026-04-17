@@ -1,0 +1,60 @@
+# LiteLLM Proxy Configuration — Mock for Local Development
+# This config simulates an intranet LLM service with fake model responses.
+#
+# In production, replace 'model_list' with real model definitions pointing
+# to your intranet LLM endpoints (D3 assumption).
+#
+# Key features enabled:
+# - OpenAI-compatible API on port 4000
+# - /chat/completions and /completions endpoints
+# - Token usage callbacks to Quota Service (when real LLM is connected)
+# - Virtual key support for API key auth
+
+model_list:
+  - model_name: gpt-3.5-turbo-mock
+    litellm_params:
+      model: fake/fake-model
+      api_key: fake-key
+      api_base: http://fake-endpoint.invalid
+
+  - model_name: gpt-4o-mock
+    litellm_params:
+      model: fake/fake-model
+      api_key: fake-key
+      api_base: http://fake-endpoint.invalid
+
+  - model_name: claude-3-sonnet-mock
+    litellm_params:
+      model: fake/fake-model
+      api_key: fake-key
+      api_base: http://fake-endpoint.invalid
+
+# LiteLLM general settings
+settings:
+  drop_params: true
+  set_verbose: false
+  json_response: false
+  request_timeout: 120
+  num_retries: 2
+  retry_after: 2
+
+# Router settings
+router_settings:
+  routing_strategy: simple-shuffle
+  redis_host: redis
+  redis_port: 6379
+  enable_pre_call_checks: false
+
+# Litellm Server settings
+litellm_settings:
+  # Suppress litellm startup logs
+  log_level: info
+  json_logs: false
+
+# Database for key management (optional, disabled in mock mode)
+database:
+  enabled: false
+
+# Health check endpoint
+environment:
+  - NODE_ENV=development

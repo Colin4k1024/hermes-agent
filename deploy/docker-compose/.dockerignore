@@ -1,0 +1,56 @@
+# Docker build ignore — prevents fat images and secret leaks
+
+# Version control
+.git
+.gitignore
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyc
+*.egg-info/
+.eggs/
+dist/
+build/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# Documentation
+*.md
+!README.md
+
+# Docker files (don't include compose files in service images)
+docker-compose*.yml
+Dockerfile*
+docker/
+deploy/
+
+# Environment and secrets
+.env
+.env.*
+*.log
+logs/
+*.tmp
+
+# Node (if any)
+node_modules/
+
+# OS
+.DS_Store
+Thumbs.db

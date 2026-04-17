@@ -1,0 +1,63 @@
+{
+  "realm": "hermes",
+  "enabled": true,
+  "sslRequired": "none",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": true,
+  "editUsernameAllowed": false,
+  "bruteForceProtected": false,
+  "clients": [
+    {
+      "clientId": "hermes-auth",
+      "name": "Hermes Auth Service",
+      "description": "Hermes Agent Enterprise SaaS — OIDC client",
+      "enabled": true,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "dev-secret",
+      "redirectUris": [
+        "http://localhost:8001/auth/oidc/callback",
+        "http://localhost:8880/realms/hermes/broker/hermes/endpoint/*"
+      ],
+      "webOrigins": [
+        "http://localhost:8001",
+        "http://localhost:8880"
+      ],
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "publicClient": false,
+      "protocol": "openid-connect",
+      "defaultClientScopes": [
+        "web-origins",
+        "acr",
+        "profile",
+        "roles",
+        "email"
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "admin",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "admin@hermes-dev.local",
+      "firstName": "Local",
+      "lastName": "Admin",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "admin",
+          "temporary": false
+        }
+      ],
+      "attributes": {
+        "hermes_role": ["admin"]
+      },
+      "realmRoles": ["admin"]
+    }
+  ]
+}

@@ -15,6 +15,12 @@ PROJECT_ROOT = Path(__file__).parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+# Feishu Bot Service package directory (named 'fbot' to avoid collision with project 'src/')
+# Add the PARENT of fbot/ so Python finds fbot/ as a package subdirectory.
+FEISHU_BOT_PARENT = PROJECT_ROOT / "services" / "feishu-bot"
+if str(FEISHU_BOT_PARENT) not in sys.path:
+    sys.path.insert(0, str(FEISHU_BOT_PARENT))
+
 
 @pytest.fixture(autouse=True)
 def _isolate_hermes_home(tmp_path, monkeypatch):

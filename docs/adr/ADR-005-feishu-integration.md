@@ -1,9 +1,10 @@
 # ADR-005: 飞书集成架构 — 独立 Bot Service vs 复用 Hermes Gateway
 
-**状态**: accepted  
-**日期**: 2026-04-15  
-**Owner**: architect  
-**关联需求**: hermes-enterprise-saas PRD  
+**状态**: accepted
+**日期**: 2026-04-15
+**更新**: 2026-04-16（增加 Redis Streams 双向 Channel 路由方案）
+**Owner**: architect
+**关联需求**: hermes-enterprise-saas PRD
 **关联 Arch Design**: docs/artifacts/2026-04-15-hermes-enterprise-saas/arch-design.md
 
 ---
@@ -145,6 +146,299 @@ Hermes Agent 已内置飞书集成能力：`gateway/platforms/feishu.py` 实现�
 - Redis Streams 不可用：临时降级为同步处理，接受飞书重发带来的重复消息（用户体验降级但不丢消息）
 - Feishu Bot Service 全部不可用：飞书消息无法处理，但 Web 和 API 接入不受影响。恢复后 Redis Streams 中的未消费消息仍可处理
 - 飞书 union_id 映射出错：管理员在 Admin Console 手动解绑/重绑
+
+---
+
+## 附录 A: 飞书 OAuth 身份绑定流程详解
+
+### A.1 身份绑定完整序列
+
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│                    飞书身份绑定完整流程                              │
+└──────────────────────────────────────────────────────────────────────┘
+
+  步骤 1: 飞书用户首次触发
+  ───────────────────────────────────────────────────────────────────
+  员工在飞书 @Hermes Bot
+         │
+         ▼
+  飞书开放平台 ── im.message.receive_v1 事件 ──▶ Feishu Bot Service
+                                                    │
+                                                    ▼
+                                              ① 签名验证
+                                              ② 提取 sender.union_id
+                                                    │
+                                                    ▼
+                                              ③ Auth Service 查询
+                                                 GET /auth/user/by-feishu-id
+                                                 ?union_id=on_xxx
+                                                    │
+                                       ┌────────────┴────────────┐
+                                       │  404: 未绑定            │
+                                       └────────────┬────────────┘
+                                                    ▼
+                                              ④ 生成绑定 nonce
+                                                 nonce = urandom(16).hex()
+                                                 写入 Redis:
+                                                 SET feishu:bind:nonce:{nonce}
+                                                   {union_id, created_at}
+                                                   EX 300
+                                                    │
+                                                    ▼
+                                              ⑤ 回复绑定卡片消息
+                                                 "请先绑定 Hermes 账号"
+
+  步骤 2: 员工在 Web 端完成绑定
+  ───────────────────────────────────────────────────────────────────
+  员工点击卡片按钮 ──▶ Browser ──▶ hermes.internal/auth/feishu-bind
+                           ?union_id=on_xxx
+                           &nonce=abc123def456
+                           &timestamp=1715000000
+                           &sign=md5(nonce+timestamp+app_secret)
+                                                    │
+                                                    ▼
+                                        Web Portal (Nginx)
+                                                    │
+                                                    ▼
+                                        Auth Service /auth/feishu-bind
+                                                    │
+                                     ┌────────────────┴────────────────┐
+                                     │  验证签名:                          │
+                                     │  sign == md5(nonce+timestamp+secret)│
+                                     │  AND timestamp within 5 min        │
+                                     │  AND Redis feishu:bind:nonce:{n}  │
+                                     │    exists                         │
+                                     └────────────────┬────────────────┘
+                                                    ▼
+                                        若未登录: 302 → SSO 登录
+                                                    │
+                                                    ▼
+                                        Auth Service 绑定操作:
+                                        UPDATE users
+                                          SET feishu_union_id = 'on_xxx'
+                                          WHERE id = {current_user_id}
+                                                    │
+                                                    ▼
+                                        删除 Redis nonce:
+                                        DEL feishu:bind:nonce:{nonce}
+                                                    │
+                                                    ▼
+                                        回复 "绑定成功" 页面
+                                        (员工切回飞书重新发消息即可)
+
+  步骤 3: 正常消息路由
+  ───────────────────────────────────────────────────────────────────
+  员工再次在飞书 @Hermes Bot
+         │
+         ▼
+  飞书开放平台 ── im.message.receive_v1 ──▶ Feishu Bot Service
+                                                    │
+                                                    ▼
+                                              签名验证 + union_id 查询
+                                                    │
+                                              Auth: GET /auth/user/by-feishu-id
+                                                    │         │
+                                       ┌────────────┘         └──── 200: {user_id}
+                                       ▼
+                               正常路由到 Agent Pod
+```
+
+### A.2 签名防伪机制（nonce + timestamp + HMAC）
+
+**绑定链接签名**（防止伪造绑定请求）：
+
+| 参数 | 位置 | 说明 |
+|------|------|------|
+| `union_id` | query | 飞书 union_id（不敏感，公开传递）|
+| `nonce` | query | 随机 16 字节十六进制（一次性使用，5min TTL）|
+| `timestamp` | query | Unix timestamp（秒），5 分钟窗口内有效 |
+| `sign` | query | `HMAC-SHA256(nonce + timestamp + app_secret)` 的十六进制摘要 |
+
+**签名验证伪代码**：
+
+```python
+def verify_bind_signature(nonce: str, timestamp: str, sign: str) -> bool:
+    # 1. 时间窗口校验（5 分钟）
+    if abs(time.time() - int(timestamp)) > 300:
+        return False
+
+    # 2. nonce 存在性校验
+    if not redis.exists(f"feishu:bind:nonce:{nonce}"):
+        return False
+
+    # 3. HMAC 签名校验
+    expected = hmac.new(
+        app_secret.encode(),
+        f"{nonce}{timestamp}".encode(),
+        hashlib.sha256
+    ).hexdigest()
+    return hmac.compare_digest(expected, sign)
+```
+
+### A.3 身份绑定状态机
+
+```
+       ┌──────────────┐
+       │   初始态      │  (users.feishu_union_id = NULL)
+       └──────┬───────┘
+              │ 员工首次在飞书 @Bot
+              ▼
+       ┌──────────────┐
+       │  等待绑定      │  (发送绑定卡片，未消费 nonce)
+       └──────┬───────┘
+              │ 员工点击链接并完成 SSO 登录
+              ▼
+       ┌──────────────┐
+       │   已绑定      │  (feishu_union_id = union_id)
+       └──────┬───────┘
+              │ 管理员在 Admin Console 解绑
+              ▼
+       ┌──────────────┐
+       │   已解绑      │  (feishu_union_id = NULL, 回到初始态)
+       └──────────────┘
+```
+
+**单用户多飞书账号支持**：平台允许一个 `feishu_union_id` 绑定一个 `platform_user_id`。同一员工的多设备共享同一个 union_id，无需额外处理。
+
+---
+
+## 附录 B: 飞书签名验证机制详解
+
+### B.1 签名验证概述
+
+飞书开放平台在每个 Webhook 请求中附加两个 HTTP Header：
+
+| Header | 说明 |
+|--------|------|
+| `X-Lark-Request-Timestamp` | 请求时间戳（Unix 秒）|
+| `X-Lark-Signature` | 请求体 + timestamp + app_secret 的 SHA256 HMAC 十六进制摘要 |
+
+验证目标是确保请求**确实来自飞书开放平台**，而非伪造。
+
+### B.2 飞书官方签名算法
+
+```
+signature = HMAC-SHA256(
+    key   = app_secret,
+    value = "{timestamp}\n{request_body}"
+).hex()
+```
+
+其中 `{timestamp}` 为 `X-Lark-Request-Timestamp` 的值，`{request_body}` 为原始请求体（JSON 字符串，**不包含**头部）。
+
+### B.3 Feishu Bot Service 签名验证实现
+
+```python
+# feishu_bot_service/signature.py
+
+import hmac
+import hashlib
+import time
+from fastapi import Request, HTTPException
+
+APP_SECRET = os.getenv("FEISHU_APP_SECRET")
+# 可信时间偏移（秒）：请求时间戳与服务器时间差超过此值则拒绝
+MAX_TIMESTAMP_OFFSET = 300  # 5 分钟
+
+async def verify_lark_signature(request: Request) -> bytes:
+    """
+    验证飞书 Webhook 签名。
+    返回原始请求体 bytes。
+    验证失败抛出 HTTPException(401)。
+    """
+    # 1. 读取 header
+    timestamp = request.headers.get("X-Lark-Request-Timestamp")
+    signature = request.headers.get("X-Lark-Signature")
+
+    if not timestamp or not signature:
+        raise HTTPException(
+            status_code=401,
+            detail="Missing required headers: X-Lark-Request-Timestamp, X-Lark-Signature"
+        )
+
+    # 2. 时间偏移校验（防止重放攻击）
+    try:
+        ts = int(timestamp)
+    except ValueError:
+        raise HTTPException(status_code=401, detail="Invalid timestamp format")
+
+    if abs(time.time() - ts) > MAX_TIMESTAMP_OFFSET:
+        raise HTTPException(
+            status_code=401,
+            detail=f"Timestamp out of range (> {MAX_TIMESTAMP_OFFSET}s)"
+        )
+
+    # 3. 读取请求体（支持重复读取）
+    body = await request.body()
+
+    # 4. 计算期望签名
+    message = f"{timestamp}\n{body.decode('utf-8')}".encode("utf-8")
+    expected = hmac.new(
+        APP_SECRET.encode("utf-8"),
+        message,
+        hashlib.sha256
+    ).hexdigest()
+
+    # 5. 常数时间比较（防止时序攻击）
+    if not hmac.compare_digest(expected, signature):
+        raise HTTPException(status_code=401, detail="Invalid signature")
+
+    return body
+```
+
+### B.4 时序攻击防护
+
+`hmac.compare_digest`（Python 标准库）在比较两个字符串时使用常数时间算法，确保比较时间与第一个不匹配字符的位置无关，防止攻击者通过测量响应时间推断正确签名。
+
+### B.5 重放攻击防护
+
+| 防护层 | 机制 | 窗口 |
+|--------|------|------|
+| 时间戳校验 | `X-Lark-Request-Timestamp` 与服务器时间差 ≤ 300s | 5 分钟 |
+| 事件 ID 去重 | Redis SETNX `dedup:feishu:{event_id}` TTL 300s | 5 分钟（覆盖飞书最多 5 次重发） |
+
+两者结合确保：
+- 5 分钟窗口内的重放请求被时间戳校验拦截（飞书自己的重发也在此窗口内，event_id 去重兜底）
+- 超出 5 分钟的旧请求无法通过时间戳校验
+- 同一 event_id 在 5 分钟内不会重复处理
+
+### B.6 验证失败处理
+
+| 失败场景 | HTTP 状态码 | 处理方式 |
+|---------|-----------|---------|
+| Header 缺失 | 401 | 记录日志（warn level），返回 body hash 作为调试 ID |
+| 时间戳越界 | 401 | 记录日志（warn level），注明时间差 |
+| 签名不匹配 | 401 | 记录日志（error level），触发安全告警（疑似伪造请求）|
+| 请求体解析失败 | 400 | 记录日志，记录原始 body，团队排查 |
+
+> 注意：所有验证失败都应**返回 200 给飞书**（参考飞书官方建议），避免飞书平台重复发送。如果返回非 200，飞书会在 3s 后重发。
+
+### B.7 安全边界总结
+
+```
+飞书 Webhook 请求 ──▶ Feishu Bot Service
+                            │
+                            ▼
+                    ① 时间戳校验
+                       (MAX 5min 窗口)
+                            │
+                            ▼
+                    ② 签名 HMAC-SHA256
+                       (app_secret 验证)
+                            │
+                            ▼
+                    ③ Event ID 去重
+                       (Redis SETNX)
+                            │
+                            ▼
+                    ④ 消息处理
+```
+
+三层防护确保：
+1. **伪造请求无法通过**：没有 app_secret 无法构造正确签名
+2. **重放攻击被拦截**：时间戳窗口 + event_id 去重双重兜底
+3. **响应时间 < 100ms**：验证逻辑无网络调用，本地 Redis 即可完成去重
 
 ---
 

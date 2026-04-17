@@ -1,11 +1,13 @@
 # Arch Design — Hermes Agent 企业内部 SaaS 平台
 
-**版本**: 0.1-draft  
-**日期**: 2026-04-15  
-**状态**: design-swarm  
-**主责角色**: architect  
-**Slug**: hermes-enterprise-saas  
+**版本**: 0.2-reviewed
+**日期**: 2026-04-16
+**状态**: design-swarm
+**主责角色**: architect
+**Slug**: hermes-enterprise-saas
 **关联 PRD**: `docs/artifacts/2026-04-15-hermes-enterprise-saas/prd.md`
+
+> **更新（2026-04-16）**：经执行团队质疑后确认了 BE-2（Pod 容器级切换）、BE-3（Redis Streams reply_channel）、DO-1（NFS Subdir External Provisioner）三个方案，已同步更新。
 
 ---
 
@@ -41,7 +43,7 @@
 | 飞书开放平台 | 外部 SaaS | Webhook + REST API (lark_oapi SDK) | D2: 企业自建应用 |
 | 内网 LLM 服务 | 内部服务 | OpenAI-compatible API via LiteLLM Proxy | D3: 若干模型可用 |
 | K8s 集群 | 基础设施 | kubectl / Helm | D4: 200 core / 800GB RAM |
-| NAS / NFS v4 | 基础设施 | K8s PV + hostPath subPath | D5: 10TB 可用 |
+| NAS / NFS v4 | 基础设施 | NFS Subdir External Provisioner + StorageClass `nfs-hermes-per-user`，每用户独立 PVC | D5: 10TB 可用 |
 | PostgreSQL | 基础设施 | 云托管或自建，单实例 + 流复制 | 内网已有 |
 | Redis | 基础设施 | 云托管或自建，Sentinel 模式 | 内网已有 |
 | 内网 DNS | 基础设施 | A 记录指向 Ingress | D6: hermes.internal.example.com |
@@ -238,13 +240,16 @@ sequenceDiagram
 
 ### 3.2 飞书消息 → Agent 响应 → 回复飞书
 
+> **更新（2026-04-16）**：原方案 Router 直接回调 FBot 存在拓扑依赖问题（Router 不知道哪个 FBot 实例在等待）。确认方案为 **Redis Streams 双向 Channel**。
+
 ```mermaid
 sequenceDiagram
     actor Employee
     participant Feishu as 飞书客户端
     participant FPlatform as 飞书开放平台
     participant FBot as Feishu Bot Service
-    participant RedisQ as Redis Streams
+    participant RedisReq as feishu:requests
+    participant RedisRes as feishu:responses:{fbot_id}
     participant Auth as Auth Service
     participant Router as Agent Router
     participant Pod as Agent Pod
@@ -254,7 +259,7 @@ sequenceDiagram
     Feishu->>FPlatform: 消息事件
     FPlatform->>FBot: POST /feishu/webhook (签名验证)
     FBot->>FBot: 验证签名 (Encrypt Key + Verification Token)
-    FBot->>FBot: 提取 sender.union_id, message.content
+    FBot->>FBot: 提取 sender.union_id, message.content, msg_id, chat_id
     FBot->>Auth: GET /auth/user/by-feishu-id?union_id=xxx
     alt 已绑定
         Auth-->>FBot: {user_id: "u-12345"}
@@ -263,21 +268,37 @@ sequenceDiagram
         FBot->>FPlatform: 回复消息卡片: "请先访问 hermes.internal 绑定账号"
         Note over FBot: 流程终止
     end
-    FBot->>RedisQ: XADD feishu:inbound {user_id, message, chat_id, msg_id}
+
+    Note over FBot: 写入两个 stream
+    FBot->>RedisReq: XADD feishu:requests "*" user_id={uid} msg_id={feishu_msg_id} chat_id={feishu_chat_id} message={content} reply_channel=feishu:responses:{fbot_instance_id}
+    FBot->>RedisRes: XADD feishu:responses:{fbot_instance_id} "*" request_id={stream_id}
     Note over FBot: 立即返回 200 给飞书 (3s 超时限制)
 
-    FBot->>RedisQ: XREAD feishu:inbound (消费者组)
-    FBot->>Router: POST /internal/route {user_id, message}
-    Router->>Pod: POST /v1/chat/completions
-    Pod->>LLM: POST /v1/chat/completions
-    LLM-->>Pod: response
-    Pod-->>Router: response
-    Router-->>FBot: response
+    FBot->>RedisRes: XREAD BLOCK 30000 COUNT 100 STREAMS feishu:responses:{fbot_instance_id} $
+    Note over FBot: 阻塞等待响应（最长 30s）
 
+    Router->>RedisReq: XREADGROUP GROUP g1 INSTANCE {consumer_id} STREAMS feishu:requests >
+    Router->>Pod: POST /v1/chat/completions {user_id, (msg_id/chat_id via headers)}
+    Pod->>LLM: POST /v1/chat/completions
+    LLM-->>Pod: streaming response
+    Pod-->>Router: streaming response
+    Router->>RedisRes: XADD feishu:responses:{fbot_instance_id} * request_id={stream_id} chunk={text} done=false
+    Router-->>RedisReq: XACK feishu:requests g1 {message_id}
+    Router-->>Pod: 完成
+
+    Note over FBot: 收到响应 chunks
+    FBot->>FBot: 组装完整响应文本
     FBot->>FPlatform: POST /im/v1/messages (回复消息卡片)
     FPlatform->>Feishu: 显示回复
     Feishu-->>Employee: Hermes 回复内容
 ```
+
+**关键设计点**：
+- **FBot 自产自销**：写 `feishu:requests`（Router 消费）+ 读自己的 `feishu:responses:{fbot_instance_id}`（自己等待）
+- **Router 无需知道 FBot 拓扑**：只知道响应 channel ID
+- **流式响应**：Router 分 chunk 写入 response stream，FBot 实时读取组装
+- **XREADBLOCK timeout**：30-60s，超时后 FBot 记录失败日志并标记 `pending_retry`
+- **Router ACK**：读取后 XACK 确认，若未 ACK 崩溃则消息重投（基于 `msg_id` 幂等处理）
 
 ### 3.3 管理员发布 Org Skill → 活跃 Agent 热更新
 
@@ -341,32 +362,39 @@ sequenceDiagram
 
 ### 4.2 冷启动流程（目标 < 3s）
 
+> **更新（2026-04-16）**：原方案"Pod 不重新创建容器，只切换 HERMES_HOME 并重载配置"存在根本问题——Hermes 进程不会动态重读 HERMES_HOME 环境变量。确认方案为 **Pod 容器级切换**：Sidecar 触发 Hermes 容器重启，entrypoint.sh 读取新的 HERMES_HOME。
+
+**确认后的冷启动流程**：
+
 ```
 T+0ms    Router 收到请求，Redis 查询无热路由
 T+50ms   Router 从 pod:idle ZSET 选取空闲 Pod (Round-Robin)
-T+100ms  Router 调用 Pod /internal/prepare API:
+T+100ms  Router 调用 Pod Sidecar /internal/prepare API:
+         - 写入 /tmp/pending_user.json {user_id, hermes_home_path}
+         - 向 Hermes 容器发送 SIGTERM（触发 WAL checkpoint）
+T+200ms  Hermes 容器收到 SIGTERM：
+         - 完成 SQLite WAL checkpoint（PRAGMA wal_checkpoint(TRUNCATE)）
+         - 优雅退出
+T+250ms  Kubernetes 自动重启 Hermes 容器
+T+300ms  Hermes entrypoint.sh 启动：
+         - 读取 /tmp/pending_user.json
          - 设置 HERMES_HOME=/nas/hermes-homes/{shard}/{user_id}
-         - 设置 API_SERVER_HOST=0.0.0.0
-         - 设置 OPENAI_BASE_URL=http://litellm.internal:4000/v1
-         - 设置 HERMES_API_KEY={per-pod-secret}
-T+200ms  Pod 进程读取 HERMES_HOME:
-         - config.yaml  (~1KB,   <1ms)
-         - state.db     (open,   ~5ms)
-         - skills/ 扫描 (~20 skills, ~50ms)
-         - .env 加载    (<1ms)
-T+500ms  Pod 返回 {ready: true}
-T+550ms  Router 写入 Redis: SET route:{user_id} {pod_id} EX 1800
-T+600ms  Router 转发原始请求到 Pod
-T+800ms  Pod 向 LiteLLM 发起 LLM 请求
-T+2500ms 首 token 返回（LLM 延迟约 1.5–2s）
+         - 删除 /tmp/pending_user.json（防止复用旧数据）
+         - 加载 config.yaml, state.db, skills/
+T+800ms  Hermes 进程就绪，返回 {ready: true}
+T+850ms  Router 写入 Redis: SET route:{user_id} {pod_id} EX 1800
+T+900ms  Router 转发原始请求到 Pod
+T+1100ms Pod 向 LiteLLM 发起 LLM 请求
+T+2800ms 首 token 返回（LLM 延迟约 1.5–2s）
 ────────
-总计: ~2.5s（含 LLM 首 token）
+总计: ~2.8s（含容器重启 ~500ms），满足 < 3s SLA
 ```
 
-**关键优化点**：
-- Pod 不重新创建容器，只切换 HERMES_HOME 并重载配置（避免 ~2s Python 启动开销）
+**关键设计点**：
+- **不改 Hermes 核心**：只扩展 `entrypoint.sh`（5-10 行），读取挂载的 `/tmp/pending_user.json`
+- **SIGTERM + WAL checkpoint**：确保 SQLite WAL 文件在重启前刷盘
+- ** Skills 热更新分批重启**：Router 遍历 active-pods 时分批 SIGTERM（batch_size=20，间隔 5s），避免 Pod Pool 瞬时耗尽
 - NAS NFS v4 本地缓存，热文件读取 < 5ms
-- 空闲 Pod 保持 Hermes 进程运行，随时可分配
 
 ### 4.3 热冷分离策略
 
@@ -376,7 +404,9 @@ T+2500ms 首 token 返回（LLM 延迟约 1.5–2s）
 | `pod:active:{pod_id}` | STRING | 1800s | Pod→用户反向索引 |
 | `pod:idle` | ZSET | — | 空闲 Pod（score = idle_since_ts）|
 | `pod:health:{pod_id}` | STRING | 60s | 最近健康检查时间戳 |
-| `session:lock:{user_id}` | STRING | 30s | 防止同一用户并发路由到不同 Pod |
+| `session:lock:{user_id}` | STRING | 30s | 分布式锁，防止同一用户并发路由（使用 `SET NX EX` 原子操作）|
+
+> **更新（2026-04-16）**：`session:lock` 使用 `SET session:lock:{user_id} {pod_id} NX EX 30` 实现原子获取，避免 GET+SET 的并发竞争风险。若获取锁失败，Router 返回 409 Conflict 并携带当前持有者信息。
 
 **回收流程**：
 1. `route:{user_id}` TTL 到期（30 分钟无请求）
@@ -385,35 +415,51 @@ T+2500ms 首 token 返回（LLM 延迟约 1.5–2s）
 4. Router 将 Pod 加回 `pod:idle` ZSET
 5. 下一个用户请求到来时复用该 Pod
 
-### 4.4 NAS 分片策略
+### 4.4 NAS 存储方案
 
-```
-/nas/hermes-homes/
-├── 00/                           # shard 0 (sha256(user_id)[:2] == "00")
-│   ├── user-a1b2c3d4/            # HERMES_HOME
-│   │   ├── config.yaml
-│   │   ├── .env
-│   │   ├── state.db              # SQLite WAL
-│   │   ├── state.db-wal
-│   │   ├── response_store.db
-│   │   ├── skills/
-│   │   ├── memories/
-│   │   ├── sessions/
-│   │   ├── logs/
-│   │   ├── hooks/
-│   │   ├── cron/
-│   │   ├── workspace/
-│   │   └── home/
-│   └── user-e5f6g7h8/
-├── 01/ ... ff/                   # 共 256 个 shard
-/nas/org-skills/                  # 组织级共享技能（只读挂载到所有 Pod）
-└── code-review-guide/
-    └── SKILL.md
+> **更新（2026-04-16）**：原 `hostPath + subPath` 方案与多 Node K8s 集群冲突。确认方案为 **NFS Subdir External Provisioner + StorageClass**。
+
+**StorageClass 配置**：
+```yaml
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: nfs-hermes-per-user
+provisioner: k8s.io/sigs.nfs-subdir-external-provisioner
+parameters:
+  pathPattern: "/hermes-homes/${namespace}/${pvcName}"
+  onDelete: "retire"
+reclaimPolicy: Retain
 ```
 
-**分片算法**：`shard = sha256(user_id).hex()[:2]`（256 个桶，每桶约 78 用户）
+**目录结构**（由 Provisioner 自动创建）：
+```
+/hermes-homes/{namespace}/{pvc-name}/
+├── config.yaml
+├── .env
+├── state.db              # SQLite WAL
+├── state.db-wal
+├── response_store.db
+├── skills/
+├── memories/
+├── sessions/
+├── logs/
+├── hooks/
+├── cron/
+├── workspace/
+└── home/
+```
 
-可选：将 256 个 shard 分配到 4 个 NFS export（每个 ~5000 用户），进一步分散 I/O。
+**关键优势**：
+- 每用户独立 PVC，K8s 原生管理生命周期
+- Pod 调度完全自由，不受 NFS 挂载约束
+- 自动创建子目录，无需手动预配
+- reclaimPolicy 设为 Retain，PVC 删除时不自动清理 NAS 数据
+
+**Fallback 方案**（集群无法安装 Provisioner）：
+- Shared NFS PVC + Init Container 动态创建子目录
+- Init Container 在 Pod 启动时创建 `/nas/hermes-homes/{user_id}/` 目录
+- subPath 为空字符串，依赖 Hermes 进程内部路径隔离
 
 ### 4.5 Pod 资源规格
 
@@ -576,8 +622,17 @@ POST /v1/chat/completions         [用户/API 访问，OpenAI format]
 POST /v1/responses                [用户/API 访问，Responses API format]
 GET  /v1/models                   [列出可用模型]
 POST /internal/route              [Feishu Bot 内部调用]
+    Body: {
+        user_id: string,
+        message: string,
+        feishu_msg_id?: string,      [可选，飞书消息 ID]
+        feishu_chat_id?: string,      [可选，飞书会话 ID]
+        reply_channel?: string         [可选，Redis response stream ID]
+    }
 GET  /internal/health             [pool_size, active_pods, idle_pods]
 ```
+
+> **更新（2026-04-16）**：`POST /internal/route` 增加 `feishu_msg_id`、`feishu_chat_id`、`reply_channel` 字段，用于飞书消息路由和响应回调。
 
 ### 6.3 Feishu Bot Webhook
 
@@ -739,21 +794,35 @@ graph TB
 
 ## 附录 B：Hermes 代码影响最小化验证
 
-通过代码审查确认，本架构方案对 Hermes Agent 的改动需求为**零**（全部通过环境变量注入）：
+> **更新（2026-04-16）**：原方案"Hermes 内置 internal endpoints"经质疑后确认为 **Pod 容器级切换**方案。Hermes 代码改动为**零**，仅扩展 entrypoint.sh。
 
-| 文件 | 关键位置 | 已有的 env var 支持 |
-|------|---------|-------------------|
-| `gateway/platforms/api_server.py` | L380 | `os.getenv("API_SERVER_HOST", "127.0.0.1")` |
-| `hermes_constants.py` | `get_hermes_home()` | `os.getenv("HERMES_HOME", ...)` |
-| `hermes_state.py` | `DEFAULT_DB_PATH` | 跟随 `get_hermes_home()` |
-| `docker/entrypoint.sh` | L5 | `HERMES_HOME="${HERMES_HOME:-/opt/data}"` |
+**确认后的代码改动范围**：
 
-**需要新增的适配 endpoint**（独立 sidecar，不修改 Hermes 主进程）：
+| 文件 | 改动 | 说明 |
+|------|------|------|
+| `docker/entrypoint.sh` | **扩展 5-10 行** | 读取 `/tmp/pending_user.json` 并设置 HERMES_HOME 后启动 |
+| Hermes 源码 | **0 行改动** | 不修改任何 Hermes 核心代码 |
 
-| Endpoint | 用途 |
-|----------|------|
-| `POST /internal/prepare` | Router 调用，注入 HERMES_HOME 并触发配置重载 |
-| `POST /internal/release` | Router 调用，刷新 SQLite WAL checkpoint，回收 Pod |
-| `POST /internal/skills/reload` | Skills Registry 调用，重新扫描 org-skills 目录 |
+**Entrypoint.sh 扩展示例**：
+```bash
+#!/bin/bash
+# 检查是否有待处理的 user
+if [ -f /tmp/pending_user.json ]; then
+    USER_HOME=$(cat /tmp/pending_user.json | jq -r '.hermes_home_path')
+    export HERMES_HOME="$USER_HOME"
+    rm -f /tmp/pending_user.json
+fi
+HERMES_HOME="${HERMES_HOME:-/opt/data}" ./start-hermes.sh
+```
 
-这三个 endpoint 作为独立 sidecar 容器运行在同一 Pod 中，通过 localhost 通信，不影响 Hermes 主进程代码。
+**Sidecar 职责**（独立容器，不属于 Hermes 源码）：
+
+| 动作 | 说明 |
+|------|------|
+| 接收 `/internal/prepare {user_id, hermes_home_path}` | 写入 `/tmp/pending_user.json` |
+| SIGTERM Hermes 容器 | 触发 WAL checkpoint 和优雅退出 |
+| 监控 Pod 重启状态 | 确保 Hermes 进程就绪 |
+
+**Skills 热更新分批重启策略**：
+- Router 收到 `channel:skill-update` 后，按 batch_size=20 分批触发 Pod 重启
+- 每批间隔 5s，避免 Pod Pool 瞬时耗尽
