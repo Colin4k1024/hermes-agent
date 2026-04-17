@@ -71,49 +71,106 @@ session_lock_key = lambda uid: f"{settings.key_session_lock}:{uid}"
 LOCK_ACQUIRED = "acquired"
 LOCK_ALREADY_HELD = "already_held"
 
+# ---------------------------------------------------------------------------
+# Lua scripts — fully atomic, single round-trip
+# ---------------------------------------------------------------------------
+
+# KEYS[1] = lock key, ARGV[1] = holder value, ARGV[2] = TTL seconds
+# Returns: nil (acquired) or existing holder (already held)
+_ACQUIRE_LOCK_LUA = """
+local holder = redis.call('GET', KEYS[1])
+if holder then
+    return holder
+end
+redis.call('SET', KEYS[1], ARGV[1], 'EX', ARGV[2])
+return nil
+"""
+
+# KEYS[1] = lock key, ARGV[1] = expected holder
+# Only deletes if the holder matches (safe release).
+# Returns: 1 (deleted) or 0 (not ours / not exists)
+_RELEASE_LOCK_LUA = """
+local holder = redis.call('GET', KEYS[1])
+if holder == false then
+    return 1  -- already gone, treat as success
+end
+if holder == ARGV[1] then
+    redis.call('DEL', KEYS[1])
+    return 1
+end
+return 0  -- held by someone else, don't touch
+"""
+
+_acquire_lock_script: redis.client.Script | None = None
+_release_lock_script: redis.client.Script | None = None
+
+
+def _get_acquire_script() -> redis.client.Script:
+    global _acquire_lock_script
+    if _acquire_lock_script is None:
+        _acquire_lock_script = get_redis().register_script(_ACQUIRE_LOCK_LUA)
+    return _acquire_lock_script
+
+
+def _get_release_script() -> redis.client.Script:
+    global _release_lock_script
+    if _release_lock_script is None:
+        _release_lock_script = get_redis().register_script(_RELEASE_LOCK_LUA)
+    return _release_lock_script
+
 
 def acquire_session_lock(
     user_id: str, pod_id: str | None = None
 ) -> tuple[bool, str | None]:
     """Atomically acquire a session lock for a user.
 
-    Uses SET key value NX EX — single atomic operation (BE-1 confirmed).
+    Uses a Lua script — single atomic operation, zero race window (BE-1 confirmed).
 
     Returns:
-        (True, pod_id)   — lock acquired
-        (False, holder)   — lock already held by another request
-        (False, None)    — Redis unavailable or error
+        (True, holder)   — lock acquired; holder is pod_id or "pending"
+        (False, holder)  — lock already held by another request; holder is the current occupant
+        (True, None)     — Redis unavailable (fail open)
     """
+    holder = pod_id or "pending"
     try:
-        client = get_redis()
-        holder = client.get(session_lock_key(user_id))
-        if holder is not None:
-            return False, holder
-
-        # NX: only set if not exists; EX: expire after TTL
-        result = client.set(
-            session_lock_key(user_id),
-            pod_id or "pending",
-            nx=True,
-            ex=settings.session_lock_ttl,
+        script = _get_acquire_script()
+        result = script(
+            keys=[session_lock_key(user_id)],
+            args=[holder, settings.session_lock_ttl],
         )
-        if result:
-            return True, pod_id or "pending"
-        # Race: another request grabbed it between our GET and SET
-        holder = client.get(session_lock_key(user_id))
-        return False, holder
+        # result is None → acquired; a string → existing holder
+        if result is None:
+            return True, holder
+        return False, result
     except Exception:
         # Redis unavailable — fail open with a warning
         logger.warning("Redis unavailable during session lock for %s", user_id)
         return True, None
 
 
-def release_session_lock(user_id: str) -> None:
-    """Release a user's session lock. Silently fails on Redis error."""
+def release_session_lock(user_id: str, holder: str | None = None) -> bool:
+    """Release a user's session lock.
+
+    Only releases if the lock is held by `holder` (prevents releasing
+    a lock that was re-acquired by a different request after TTL expiry).
+
+    Returns True on success or lock already absent; False if held by another.
+    Silently returns True on Redis error.
+    """
+    if holder is None:
+        # Backward compat: delete unconditionally (old call sites)
+        holder = "pending"
+
     try:
-        get_redis().delete(session_lock_key(user_id))
+        script = _get_release_script()
+        result = script(
+            keys=[session_lock_key(user_id)],
+            args=[holder],
+        )
+        return result == 1
     except Exception as exc:
         logger.warning("Failed to release session lock for %s: %s", user_id, exc)
+        return True  # fail open on release
 
 
 # ---------------------------------------------------------------------------
