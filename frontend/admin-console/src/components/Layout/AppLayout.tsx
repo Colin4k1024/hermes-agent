@@ -7,6 +7,8 @@ import {
   KeyOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
+  ToolOutlined,
+  AuditOutlined,
 } from '@ant-design/icons';
 
 const { Header, Sider, Content } = Layout;
@@ -16,6 +18,8 @@ const menuItems = [
   { key: '/dashboard', icon: <DashboardOutlined />, label: '用量看板' },
   { key: '/users', icon: <UserOutlined />, label: '用户管理' },
   { key: '/tokens', icon: <KeyOutlined />, label: 'API Token' },
+  { key: '/skills', icon: <ToolOutlined />, label: 'Skills 管理' },
+  { key: '/audit', icon: <AuditOutlined />, label: '审计日志' },
 ];
 
 export default function AppLayout() {
