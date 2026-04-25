@@ -12,4 +12,8 @@ data:
   STATE_PORT: "8006"
   STATE_DEBUG: "false"
   STATE_REDIS_URL: "redis://redis.hermes-platform.svc.cluster.local:6379/0"
+  STATE_OBJECT_STORAGE_ENDPOINT: "http://minio.hermes-platform.svc.cluster.local:9000"
+  STATE_OBJECT_STORAGE_BUCKET: "hermes-state-cache"
   STATE_DEFAULT_TENANT_ID: "default"
+  STATE_AUTO_CREATE_SCHEMA: "false"
+  STATE_EXPECTED_MIGRATION_REVISION: "20260425_0001"

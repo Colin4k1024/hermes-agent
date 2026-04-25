@@ -57,7 +57,7 @@ spec:
               value: "postgresql+asyncpg://hermes:$(POSTGRES_PASSWORD)@postgres.hermes-platform.svc.cluster.local:5432/hermes_platform"
           readinessProbe:
             httpGet:
-              path: /health
+              path: /ready
               port: 8006
             initialDelaySeconds: 10
             periodSeconds: 10

@@ -19,6 +19,7 @@
 | 类型 | 文件 | 状态 | 说明 |
 |------|------|------|------|
 | **Implementation Changelog** | `2026-04-25-hermes-state-store-saas/CHANGELOG.md` | ✅ implemented | StateStore、State Service、Router stateless runtime、部署和测试记录 |
+| **Next Steps** | `2026-04-25-hermes-state-store-saas/NEXT-STEPS.md` | 🚧 in-progress | 后续生产化、安全、集成测试、secret/cache/skills 远程化和 E2E 发布门禁计划；Phase 1 首批能力已完成 |
 
 ## ADRs
 

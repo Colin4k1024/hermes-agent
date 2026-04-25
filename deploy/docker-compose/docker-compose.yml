@@ -45,6 +45,27 @@ services:
     networks:
       - hermes-network
 
+  minio:
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    container_name: hermes-minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-hermes}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-hermes-minio-change-me}
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9000/minio/health/live || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - hermes-network
+
   # ══════════════════════════════════════════════════════════════
   # Control Plane — Services
   # ══════════════════════════════════════════════════════════════
@@ -156,8 +177,11 @@ services:
       - STATE_DEBUG=true
       - STATE_DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-hermes}:${POSTGRES_PASSWORD:-hermes}@postgres:5432/${POSTGRES_DB:-hermes_platform}
       - STATE_REDIS_URL=redis://redis:6379/0
+      - STATE_OBJECT_STORAGE_ENDPOINT=http://minio:9000
+      - STATE_OBJECT_STORAGE_BUCKET=hermes-state-cache
       - STATE_INTERNAL_API_KEY=${INTERNAL_API_KEY:-dev-state-key-change-in-prod}
       - STATE_DEFAULT_TENANT_ID=default
+      - STATE_AUTO_CREATE_SCHEMA=false
     volumes:
       - ../../services/state-service:/app:ro
     depends_on:
@@ -165,8 +189,10 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      minio:
+        condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:8006/health || exit 1"]
+      test: ["CMD-SHELL", "curl -sf http://localhost:8006/ready || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -395,7 +421,7 @@ services:
       # Point to LiteLLM proxy (use litellm-mock profile for dev without API keys)
       - LLM_PROVIDER=openai
       - OPENAI_API_BASE=http://litellm:4000
-      - OPENAI_API_KEY=${LITE...rod}
+      - OPENAI_API_KEY=${LITELLM_MASTER_KEY:-sk-mock-key-change-in-prod}
     volumes:
       - hermes_dev_data:/opt/data
       - ../../.:/opt/hermes:ro
@@ -451,6 +477,7 @@ networks:
 volumes:
   postgres_data:
   redis_data:
+  minio_data:
   auth_service_data:
   router_service_data:
   skills_registry_dev_skills:

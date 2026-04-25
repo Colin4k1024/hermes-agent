@@ -9,8 +9,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import and_, desc, func, not_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from state_service.database import close_db, get_session, health_check, init_db
-from state_service.models import CacheMetadata, MemoryRecord, Message, Session, UserConfig, now_utc
+from state_service.database import close_db, get_session, health_check, init_db, readiness_check
+from state_service.models import AuditEvent, CacheMetadata, MemoryRecord, Message, Session, UserConfig, now_utc
 from state_service.schemas import (
     CacheMetadataRequest,
     CacheMetadataResponse,
@@ -79,9 +79,42 @@ def _session_to_response(session: Session) -> SessionResponse:
     )
 
 
+async def _audit(
+    db: AsyncSession,
+    ctx: RequestContext,
+    action: str,
+    resource_type: str,
+    resource_id: str | None = None,
+    *,
+    session_id: str | None = None,
+    metadata: dict | None = None,
+) -> None:
+    """Record a sanitized audit event for state access."""
+    db.add(
+        AuditEvent(
+            tenant_id=ctx.tenant_id,
+            user_id=ctx.user_id,
+            session_id=session_id or ctx.session_id,
+            request_id=ctx.request_id,
+            action=action,
+            resource_type=resource_type,
+            resource_id=resource_id,
+            metadata_json=metadata or {},
+        )
+    )
+
+
 @app.get("/health", tags=["Health"])
 async def health() -> dict:
     return {"service": "state-service", "version": "0.1.0", "db_ok": await health_check()}
+
+
+@app.get("/ready", tags=["Health"])
+async def ready() -> dict:
+    checks = await readiness_check()
+    if not checks["db_ok"] or not checks["migration_ok"]:
+        raise HTTPException(status_code=503, detail=checks)
+    return {"service": "state-service", "version": "0.1.0", **checks}
 
 
 @app.get("/state/config/effective", response_model=EffectiveConfigResponse, tags=["Config"])
@@ -105,6 +138,7 @@ async def get_effective_config(
         for part in parts[:-1]:
             target = target.setdefault(part, {})
         target[parts[-1]] = row.value
+    await _audit(db, ctx, "read", "config", "effective")
     return EffectiveConfigResponse(tenant_id=ctx.tenant_id, user_id=ctx.user_id, config=merged)
 
 
@@ -136,6 +170,7 @@ async def upsert_config(
         row.value = req.value
         row.updated_at = now_utc()
     await db.flush()
+    await _audit(db, ctx, "write", "config", req.key, metadata={"scope": req.scope})
     return {"ok": True}
 
 
@@ -163,6 +198,7 @@ async def create_session(
         await db.flush()
     elif session.tenant_id != ctx.tenant_id or session.user_id != ctx.user_id:
         raise HTTPException(status_code=403, detail="Session belongs to another user")
+    await _audit(db, ctx, "write", "session", session.id, session_id=session.id, metadata={"source": session.source})
     return _session_to_response(session)
 
 
@@ -233,6 +269,7 @@ async def list_sessions(
             "parent_session_id": session.parent_session_id,
             "preview": preview,
         })
+    await _audit(db, ctx, "read", "session_list", metadata={"count": len(results), "source": source})
     return SessionsListResponse(sessions=results)
 
 
@@ -245,6 +282,7 @@ async def get_session_by_id(
     session = await db.get(Session, session_id)
     if session is None or session.tenant_id != ctx.tenant_id or session.user_id != ctx.user_id:
         raise HTTPException(status_code=404, detail="Session not found")
+    await _audit(db, ctx, "read", "session", session_id, session_id=session_id)
     return _session_to_response(session)
 
 
@@ -261,6 +299,7 @@ async def patch_session(
     if req.title is not None:
         session.title = req.title[:200]
     await db.flush()
+    await _audit(db, ctx, "write", "session", session_id, session_id=session_id, metadata={"field": "title"})
     return _session_to_response(session)
 
 
@@ -294,6 +333,15 @@ async def append_message(
         session.tool_call_count += len(req.tool_calls) if isinstance(req.tool_calls, list) else 1
     db.add(msg)
     await db.flush()
+    await _audit(
+        db,
+        ctx,
+        "write",
+        "message",
+        str(msg.id),
+        session_id=session_id,
+        metadata={"role": req.role, "has_content": req.content is not None, "tool_name": req.tool_name},
+    )
     return {"id": msg.id}
 
 
@@ -331,6 +379,7 @@ async def get_messages(
             if row.codex_reasoning_items:
                 msg["codex_reasoning_items"] = row.codex_reasoning_items
         messages.append(msg)
+    await _audit(db, ctx, "read", "messages", session_id, session_id=session_id, metadata={"count": len(messages)})
     return MessagesResponse(messages=messages)
 
 
@@ -377,7 +426,7 @@ async def search_messages(
         stmt = stmt.where(not_(Session.source.in_(excluded)))
 
     rows = (await db.execute(stmt)).all()
-    return MessageSearchResponse(results=[
+    results = [
         {
             "session_id": msg.session_id,
             "message_id": msg.id,
@@ -391,7 +440,9 @@ async def search_messages(
             "parent_session_id": session.parent_session_id,
         }
         for msg, session in rows
-    ])
+    ]
+    await _audit(db, ctx, "search", "messages", metadata={"count": len(results), "roles": sorted(roles)})
+    return MessageSearchResponse(results=results)
 
 
 @app.post("/state/sessions/{session_id}/usage", tags=["Sessions"])
@@ -419,6 +470,15 @@ async def update_usage(
     if req.model and not session.model:
         session.model = req.model
     await db.flush()
+    await _audit(
+        db,
+        ctx,
+        "write",
+        "session_usage",
+        session_id,
+        session_id=session_id,
+        metadata={"absolute": req.absolute, "model": req.model},
+    )
     return {"ok": True}
 
 
@@ -435,6 +495,7 @@ async def end_session(
     session.ended_at = now_utc()
     session.end_reason = req.end_reason
     await db.flush()
+    await _audit(db, ctx, "write", "session", session_id, session_id=session_id, metadata={"end_reason": req.end_reason})
     return {"ok": True}
 
 
@@ -450,6 +511,7 @@ async def reopen_session(
     session.ended_at = None
     session.end_reason = None
     await db.flush()
+    await _audit(db, ctx, "write", "session", session_id, session_id=session_id, metadata={"reopened": True})
     return {"ok": True}
 
 
@@ -470,6 +532,7 @@ async def list_memory(
         )
     ).order_by(MemoryRecord.updated_at.desc())
     rows = (await db.execute(stmt)).scalars().all()
+    await _audit(db, ctx, "read", "memory", namespace, metadata={"count": len(rows)})
     return MemoryListResponse(items=[
         MemoryItem(
             namespace=row.namespace,
@@ -515,6 +578,7 @@ async def upsert_memory(
         row.is_deleted = False
         row.updated_at = now_utc()
     await db.flush()
+    await _audit(db, ctx, "write", "memory", f"{namespace}/{key}", metadata={"metadata_keys": sorted(req.metadata)})
     return MemoryItem(
         namespace=row.namespace,
         key=row.key,
@@ -545,6 +609,7 @@ async def delete_memory(
     row.is_deleted = True
     row.updated_at = now_utc()
     await db.flush()
+    await _audit(db, ctx, "delete", "memory", f"{namespace}/{key}")
     return {"ok": True}
 
 
@@ -585,6 +650,14 @@ async def put_cache_metadata(
         row.metadata_json = req.metadata
         row.updated_at = now_utc()
     await db.flush()
+    await _audit(
+        db,
+        ctx,
+        "write",
+        "cache_metadata",
+        cache_key,
+        metadata={"kind": req.kind, "size_bytes": req.size_bytes},
+    )
     return CacheMetadataResponse(
         cache_key=row.cache_key,
         kind=row.kind,
@@ -611,6 +684,7 @@ async def get_cache_metadata(
     row = (await db.execute(stmt)).scalar_one_or_none()
     if row is None:
         raise HTTPException(status_code=404, detail="Cache metadata not found")
+    await _audit(db, ctx, "read", "cache_metadata", cache_key, metadata={"kind": row.kind})
     return CacheMetadataResponse(
         cache_key=row.cache_key,
         kind=row.kind,

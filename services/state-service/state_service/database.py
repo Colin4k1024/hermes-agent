@@ -29,6 +29,8 @@ async_session_factory = async_sessionmaker(
 
 
 async def init_db() -> None:
+    if not settings.auto_create_schema:
+        return
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
@@ -44,6 +46,28 @@ async def health_check() -> bool:
         return True
     except Exception:
         return False
+
+
+async def current_migration_revision() -> str | None:
+    """Return the Alembic revision stamped in the database, if present."""
+    try:
+        async with engine.connect() as conn:
+            result = await conn.execute(text("SELECT version_num FROM alembic_version"))
+            return result.scalar_one_or_none()
+    except Exception:
+        return None
+
+
+async def readiness_check() -> dict:
+    """Return dependency and migration readiness for Kubernetes probes."""
+    db_ok = await health_check()
+    revision = await current_migration_revision()
+    return {
+        "db_ok": db_ok,
+        "migration_revision": revision,
+        "expected_migration_revision": settings.expected_migration_revision,
+        "migration_ok": revision == settings.expected_migration_revision,
+    }
 
 
 @asynccontextmanager

@@ -1,8 +1,14 @@
 import asyncio
 
+import pytest
+from alembic import command
+from alembic.config import Config
+from fastapi import HTTPException
+from sqlalchemy import inspect, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy import create_engine
 
-from state_service.models import Base
+from state_service.models import AuditEvent, Base
 from state_service.schemas import (
     CacheMetadataRequest,
     ConfigUpsertRequest,
@@ -13,6 +19,33 @@ from state_service.schemas import (
     SessionCreateRequest,
     UsageUpdateRequest,
 )
+
+
+def test_alembic_initial_migration_creates_schema(tmp_path, monkeypatch):
+    import state_service.config as state_config
+
+    db_url = f"sqlite+aiosqlite:///{tmp_path / 'migration.db'}"
+    monkeypatch.setenv("STATE_DATABASE_URL", db_url)
+    state_config.settings.database_url = db_url
+
+    cfg = Config("services/state-service/alembic.ini")
+    cfg.set_main_option("script_location", "services/state-service/alembic")
+
+    command.upgrade(cfg, "head")
+    sync_engine = create_engine(f"sqlite:///{tmp_path / 'migration.db'}")
+    try:
+        tables = set(inspect(sync_engine).get_table_names())
+        assert {
+            "alembic_version",
+            "state_user_configs",
+            "state_sessions",
+            "state_messages",
+            "state_memory",
+            "state_cache_metadata",
+            "state_audit_events",
+        }.issubset(tables)
+    finally:
+        sync_engine.dispose()
 
 
 def test_state_service_session_memory_cache_flow(tmp_path):
@@ -104,8 +137,38 @@ def test_state_service_session_memory_cache_flow(tmp_path):
             loaded_cache = await get_cache_metadata("doc/1", ctx, db)
             assert loaded_cache.kind == "document"
 
+            audit_rows = (await db.execute(
+                select(AuditEvent).where(AuditEvent.tenant_id == "corp")
+            )).scalars().all()
+            audit_actions = {row.action for row in audit_rows}
+            assert {"read", "write", "search"}.issubset(audit_actions)
+
             await db.commit()
 
+        await engine.dispose()
+
+    asyncio.run(scenario())
+
+
+def test_state_service_rejects_cross_user_session_access(tmp_path):
+    async def scenario():
+        from state_service.main import create_session, get_session_by_id
+
+        engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'isolation.db'}")
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+        factory = async_sessionmaker(engine, expire_on_commit=False, autoflush=False)
+        async with factory() as db:
+            owner = RequestContext(tenant_id="corp", user_id="u-1", session_id="s-1")
+            attacker = RequestContext(tenant_id="corp", user_id="u-2", session_id="s-1")
+            await create_session(SessionCreateRequest(session_id="s-1", source="api"), owner, db)
+
+            with pytest.raises(HTTPException) as exc:
+                await get_session_by_id("s-1", attacker, db)
+            assert exc.value.status_code == 404
+
+            await db.commit()
         await engine.dispose()
 
     asyncio.run(scenario())

@@ -1,4 +1,8 @@
-from agent.state_store import RuntimeContext
+import json
+
+import httpx
+
+from agent.state_store import RemoteStateStore, RuntimeContext
 from tools.memory_tool import RemoteMemoryStore
 
 
@@ -58,3 +62,46 @@ def test_remote_memory_store_add_replace_remove():
     removed = store.remove("memory", "engineering")
     assert removed["success"] is True
     assert removed["entries"] == []
+
+
+def test_remote_state_store_sends_runtime_context_headers(monkeypatch):
+    seen = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        assert request.headers["x-tenant-id"] == "corp"
+        assert request.headers["x-user-id"] == "u-1"
+        assert request.headers["x-session-id"] == "s-1"
+        assert request.headers["x-request-id"] == "r-1"
+        assert request.headers["authorization"] == "Bearer state-token"
+        if request.url.path == "/state/config/effective":
+            return httpx.Response(200, json={"config": {"model": {"default": "test-model"}}})
+        if request.url.path == "/state/sessions":
+            body = json.loads(request.content.decode("utf-8"))
+            assert body["session_id"] == "s-1"
+            return httpx.Response(200, json={"id": "s-1"})
+        return httpx.Response(404, json={"detail": "not found"})
+
+    transport = httpx.MockTransport(handler)
+    real_client = httpx.Client
+
+    def client_factory(*args, **kwargs):
+        return real_client(transport=transport, timeout=kwargs.get("timeout"))
+
+    monkeypatch.setattr(httpx, "Client", client_factory)
+    store = RemoteStateStore(
+        "http://state-service",
+        RuntimeContext(
+            tenant_id="corp",
+            user_id="u-1",
+            session_id="s-1",
+            request_id="r-1",
+            state_token="state-token",
+        ),
+    )
+    try:
+        assert store.config.get_effective_config()["model"]["default"] == "test-model"
+        assert store.sessions.create_session("s-1", "api") == "s-1"
+        assert [req.url.path for req in seen] == ["/state/config/effective", "/state/sessions"]
+    finally:
+        store.close()

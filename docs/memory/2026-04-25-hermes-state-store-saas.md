@@ -79,7 +79,7 @@ services/state-service/tests/test_state_service.py -q
 最新结果：
 
 ```text
-32 passed, 1 warning
+36 passed
 ```
 
 注意：
@@ -102,3 +102,23 @@ services/state-service/tests/test_state_service.py -q
 4. 接入 secret-service，替代 `.env` 明文下发。
 5. 远程化 skills registry 和 prompt skills snapshot。
 6. 做一次端到端：Auth Service -> Router -> Agent Pod -> State Service。
+
+详细执行拆分已维护在：
+
+```text
+docs/artifacts/2026-04-25-hermes-state-store-saas/NEXT-STEPS.md
+```
+
+## 2026-04-25 批量开发更新
+
+已继续完成 Phase 1/2/3 的第一批生产化能力：
+
+- State Service 增加 Alembic migration `20260425_0001`。
+- State Service Docker 启动前执行 `alembic upgrade head`。
+- 新增 `/ready` readiness endpoint，检查数据库和 migration revision。
+- 新增 `state_audit_events` 表和主要状态读写审计 hooks。
+- 新增 State Service HTTP API 测试。
+- 新增 RemoteStateStore HTTP header 传递测试。
+- 新增跨用户 session 访问拒绝测试。
+- docker-compose 增加 MinIO，State Service 增加 object storage 配置。
+- K8s state-service readiness probe 改为 `/ready`。

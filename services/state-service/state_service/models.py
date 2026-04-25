@@ -51,6 +51,7 @@ class UserConfig(Base):
 class Session(Base):
     __tablename__ = "state_sessions"
     __table_args__ = (
+        Index("ix_state_sessions_owner_id", "tenant_id", "user_id", "id"),
         Index("ix_state_sessions_owner_started", "tenant_id", "user_id", "started_at"),
         Index("ix_state_sessions_parent", "parent_session_id"),
     )
@@ -141,3 +142,22 @@ class CacheMetadata(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=now_utc, onupdate=now_utc, nullable=False
     )
+
+
+class AuditEvent(Base):
+    __tablename__ = "state_audit_events"
+    __table_args__ = (
+        Index("ix_state_audit_owner_created", "tenant_id", "user_id", "created_at"),
+        Index("ix_state_audit_resource", "tenant_id", "resource_type", "resource_id"),
+    )
+
+    id: Mapped[int] = mapped_column(SqliteAutoincrementBigInt, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), nullable=False, default="default")
+    user_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    session_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    request_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    action: Mapped[str] = mapped_column(String(64), nullable=False)
+    resource_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    resource_id: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    metadata_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, nullable=False)
