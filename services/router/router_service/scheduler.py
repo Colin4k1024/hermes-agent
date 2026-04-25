@@ -121,7 +121,10 @@ def _get_sidecar_url(pod_id: str) -> str:
 # ---------------------------------------------------------------------------
 
 async def _cold_start_pod(
-    user_id: str, hermes_home_path: str
+    user_id: str,
+    hermes_home_path: str,
+    runtime_context: dict | None = None,
+    stateless: bool = False,
 ) -> tuple[str | None, int, int]:
     """Select an idle Pod and trigger cold-start via Sidecar.
 
@@ -148,6 +151,13 @@ async def _cold_start_pod(
                     json=InternalPrepareRequest(
                         user_id=user_id,
                         hermes_home_path=hermes_home_path,
+                        runtime_context=runtime_context,
+                        stateless=stateless,
+                        env_vars={
+                            "HERMES_STATE_MODE": "remote",
+                            "HERMES_STATE_SERVICE_URL": settings.state_service_url,
+                            "HERMES_STATE_SERVICE_TOKEN": settings.state_service_token,
+                        } if stateless else None,
                     ).model_dump(),
                 )
                 if resp.status_code == 200:
@@ -189,13 +199,14 @@ async def route_request(
     6. Release session lock
     """
     user_id = req.user_id
+    route_subject = req.session_id or user_id
     start_time = time.monotonic()
 
     # Step 1: Acquire session lock — prevents concurrent routing for same user
-    lock_ok, holder = rc.acquire_session_lock(user_id)
+    lock_ok, holder = rc.acquire_session_lock(route_subject)
     if not lock_ok:
         logger.info(
-            "Session lock denied for user %s, held by %s", user_id, holder
+            "Session lock denied for route subject %s, held by %s", route_subject, holder
         )
         return InternalRouteResponse(
             success=False,
@@ -216,7 +227,7 @@ async def route_request(
             )
 
         # Step 3: Try hot route
-        hot_pod_id = rc.get_route(user_id)
+        hot_pod_id = rc.get_route(route_subject)
         if hot_pod_id:
             # Verify pod is still healthy
             if rc.is_pod_healthy(hot_pod_id):
@@ -233,22 +244,44 @@ async def route_request(
                 logger.info(
                     "Hot route found for %s (pod %s) but pod unhealthy, "
                     "triggering cold start",
-                    user_id, hot_pod_id,
+                    route_subject, hot_pod_id,
                 )
-                rc.delete_route(user_id)
+                rc.delete_route(route_subject)
 
         # Step 4: Cold start
-        # Get NAS shard from user_id for hermes_home_path construction
-        # Default shard "00" — in production, Auth Service provides nas_shard
-        nas_shard = hashlib.sha256(user_id.encode()).hexdigest()[:2]
-        hermes_home_path = (
-            req.user_id
-            if req.user_id.startswith("/")
-            else f"/nas/hermes-homes/{nas_shard}/user-{user_id}"
-        )
+        runtime_context = req.runtime_context
+        if runtime_context is None:
+            runtime_context = {
+                "tenant_id": req.tenant_id or "default",
+                "user_id": user_id,
+                "session_id": req.session_id,
+                "request_id": req.request_id,
+                "state_service_url": settings.state_service_url,
+                "state_token": settings.state_service_token,
+            }
+        else:
+            runtime_context = runtime_context.model_dump()
+            if not runtime_context.get("state_service_url"):
+                runtime_context["state_service_url"] = settings.state_service_url
+            if not runtime_context.get("state_token"):
+                runtime_context["state_token"] = settings.state_service_token
+
+        if settings.stateless_runtime:
+            hermes_home_path = f"/tmp/hermes-runtime/{route_subject}"
+        else:
+            # Get NAS shard from user_id for hermes_home_path construction.
+            nas_shard = hashlib.sha256(user_id.encode()).hexdigest()[:2]
+            hermes_home_path = (
+                req.user_id
+                if req.user_id.startswith("/")
+                else f"/nas/hermes-homes/{nas_shard}/user-{user_id}"
+            )
 
         pod_id, cold_start_ms, retries = await _cold_start_pod(
-            user_id, hermes_home_path
+            user_id,
+            hermes_home_path,
+            runtime_context=runtime_context,
+            stateless=settings.stateless_runtime,
         )
 
         if not pod_id:
@@ -259,13 +292,13 @@ async def route_request(
             )
 
         # Step 5: Set hot route in Redis
-        rc.set_route(user_id, pod_id)
+        rc.set_route(route_subject, pod_id)
         rc.set_pod_health(pod_id)
 
         elapsed_ms = int((time.monotonic() - start_time) * 1000)
         logger.info(
-            "Cold start for user %s → pod %s in %dms (retries=%d)",
-            user_id, pod_id, cold_start_ms, retries,
+            "Cold start for route subject %s → pod %s in %dms (retries=%d)",
+            route_subject, pod_id, cold_start_ms, retries,
         )
 
         return InternalRouteResponse(
@@ -280,7 +313,7 @@ async def route_request(
 
     finally:
         # Step 6: Always release lock
-        rc.release_session_lock(user_id)
+        rc.release_session_lock(route_subject)
 
 
 # ---------------------------------------------------------------------------

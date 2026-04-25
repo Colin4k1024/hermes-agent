@@ -49,41 +49,60 @@ def mock_settings():
 # ---------------------------------------------------------------------------
 
 class TestSessionLock:
-    """Test SET NX EX atomic lock (BE-1 confirmed pattern)."""
+    """Test Redis Lua-backed atomic session locks."""
 
     def test_acquire_lock_success(self, mock_redis_pool):
         """Lock is acquired when key does not exist."""
-        from router_service.redis_client import acquire_session_lock
+        from router_service.redis_client import acquire_session_lock, session_lock_key
 
         mock_client = MagicMock()
-        mock_client.get.return_value = None  # key not exists
-        mock_client.set.return_value = True  # SET NX succeeds
-        mock_redis_pool.__enter__ = MagicMock(return_value=mock_client)
-        mock_redis_pool.__exit__ = MagicMock(return_value=False)
-        with patch("router_service.redis_client.get_redis", return_value=mock_client):
+        script = MagicMock(return_value=None)
+        mock_client.register_script.return_value = script
+        with (
+            patch("router_service.redis_client._acquire_lock_script", None),
+            patch("router_service.redis_client.get_redis", return_value=mock_client),
+        ):
             ok, holder = acquire_session_lock("user-1", "pod-1")
+
         assert ok is True
         assert holder == "pod-1"
+        script.assert_called_once_with(
+            keys=[session_lock_key("user-1")],
+            args=["pod-1", 30],
+        )
 
     def test_acquire_lock_already_held(self, mock_redis_pool):
         """Lock denied when another request holds it."""
         from router_service.redis_client import acquire_session_lock
 
         mock_client = MagicMock()
-        mock_client.get.return_value = "pod-2"  # already held
-        with patch("router_service.redis_client.get_redis", return_value=mock_client):
+        mock_client.register_script.return_value = MagicMock(return_value="pod-2")
+        with (
+            patch("router_service.redis_client._acquire_lock_script", None),
+            patch("router_service.redis_client.get_redis", return_value=mock_client),
+        ):
             ok, holder = acquire_session_lock("user-1", "pod-1")
+
         assert ok is False
         assert holder == "pod-2"
 
     def test_release_lock(self, mock_redis_pool):
         """Lock is deleted on release."""
-        from router_service.redis_client import release_session_lock
+        from router_service.redis_client import release_session_lock, session_lock_key
 
         mock_client = MagicMock()
-        with patch("router_service.redis_client.get_redis", return_value=mock_client):
-            release_session_lock("user-1")
-        mock_client.delete.assert_called_once()
+        script = MagicMock(return_value=1)
+        mock_client.register_script.return_value = script
+        with (
+            patch("router_service.redis_client._release_lock_script", None),
+            patch("router_service.redis_client.get_redis", return_value=mock_client),
+        ):
+            assert release_session_lock("user-1") is True
+
+        script.assert_called_once_with(
+            keys=[session_lock_key("user-1")],
+            args=["pending"],
+        )
 
 
 # ---------------------------------------------------------------------------

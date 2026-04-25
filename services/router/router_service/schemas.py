@@ -23,6 +23,20 @@ class RouteSource(str, Enum):
     COLD = "cold"    # Cold start: selected from idle pool
 
 
+class RuntimeContext(BaseModel):
+    """Identity and state context forwarded to a stateless Agent Pod."""
+
+    tenant_id: str = Field(default="default")
+    user_id: str
+    session_id: str | None = None
+    request_id: str | None = None
+    role: str | None = None
+    quota_group: str | None = None
+    allowed_tools: list[str] = Field(default_factory=list)
+    state_service_url: str | None = None
+    state_token: str | None = None
+
+
 # ---------------------------------------------------------------------------
 # Internal route request/response
 # ---------------------------------------------------------------------------
@@ -49,6 +63,16 @@ class InternalRouteRequest(BaseModel):
     # feishu_bot_id is extracted from reply_channel by Router if needed
     estimated_tokens: int | None = Field(
         default=None, description="Estimated token count for quota check"
+    )
+    tenant_id: str = Field(default="default", description="Tenant boundary for remote state")
+    session_id: str | None = Field(
+        default=None,
+        description="Conversation/session ID. Stateless routing locks on this when present.",
+    )
+    request_id: str | None = Field(default=None, description="Trace/request ID")
+    runtime_context: RuntimeContext | None = Field(
+        default=None,
+        description="Pre-authenticated runtime context from the caller/Auth Service.",
     )
 
 
@@ -86,6 +110,14 @@ class InternalPrepareRequest(BaseModel):
     )
     env_vars: dict[str, str] | None = Field(
         default=None, description="Optional additional env vars"
+    )
+    runtime_context: RuntimeContext | None = Field(
+        default=None,
+        description="Remote-state runtime context for stateless Agent pods",
+    )
+    stateless: bool = Field(
+        default=False,
+        description="True when the pod should avoid user-local persistent HERMES_HOME state",
     )
 
 

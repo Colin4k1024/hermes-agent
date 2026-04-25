@@ -26,6 +26,9 @@ class Settings(BaseSettings):
 
     # Route TTL (seconds) — matches 30-minute idle timeout
     route_ttl: int = 1800
+    # Stateless runtime mode routes by session/request context instead of
+    # treating the pod as a long-lived user home.
+    stateless_runtime: bool = True
     # Session lock TTL (seconds) — prevents concurrent routing for same user
     session_lock_ttl: int = 30
     # Pod health TTL (seconds)
@@ -54,6 +57,10 @@ class Settings(BaseSettings):
     # Auth Service (for JWT verification)
     auth_service_url: str = "http://auth-service.hermes-control.svc.cluster.local:8001"
     auth_verify_endpoint: str = "/auth/token/verify"
+
+    # State Service (remote user/session/config/memory/cache state)
+    state_service_url: str = "http://state-service.hermes-control.svc.cluster.local:8006"
+    state_service_token: str = "dev-state-key-change-in-prod"
 
     # Quota Service
     quota_service_url: str = "http://quota-service.hermes-control.svc.cluster.local:8003"

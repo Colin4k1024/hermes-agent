@@ -27,6 +27,7 @@ import json
 import logging
 import os
 import re
+import hashlib
 import tempfile
 from contextlib import contextmanager
 from pathlib import Path
@@ -460,6 +461,179 @@ class MemoryStore:
             raise RuntimeError(f"Failed to write memory file {path}: {e}")
 
 
+class RemoteMemoryStore(MemoryStore):
+    """MemoryStore-compatible adapter backed by StateStore memory APIs."""
+
+    def __init__(self, backend, memory_char_limit: int = 2200, user_char_limit: int = 1375):
+        super().__init__(memory_char_limit=memory_char_limit, user_char_limit=user_char_limit)
+        self._backend = backend
+        self._keys: Dict[str, Dict[str, str]] = {"memory": {}, "user": {}}
+
+    def load_from_disk(self):
+        """Load entries from the remote state service and capture prompt snapshot."""
+        for target in ("memory", "user"):
+            entries: List[str] = []
+            keys: Dict[str, str] = {}
+            try:
+                for item in self._backend.list_memory(namespace=target):
+                    value = str(item.get("value", "")).strip()
+                    key = str(item.get("key", "")).strip()
+                    if value:
+                        entries.append(value)
+                        if key:
+                            keys[value] = key
+            except Exception as exc:
+                logger.warning("Remote memory load failed for %s: %s", target, exc)
+                entries = []
+                keys = {}
+            self._set_entries(target, list(dict.fromkeys(entries)))
+            self._keys[target] = keys
+
+        self._system_prompt_snapshot = {
+            "memory": self._render_block("memory", self.memory_entries),
+            "user": self._render_block("user", self.user_entries),
+        }
+
+    def save_to_disk(self, target: str):
+        """Remote memory is written per mutation; no bulk file write needed."""
+        return None
+
+    def _reload_target(self, target: str):
+        entries: List[str] = []
+        keys: Dict[str, str] = {}
+        for item in self._backend.list_memory(namespace=target):
+            value = str(item.get("value", "")).strip()
+            key = str(item.get("key", "")).strip()
+            if value:
+                entries.append(value)
+                if key:
+                    keys[value] = key
+        self._set_entries(target, list(dict.fromkeys(entries)))
+        self._keys[target] = keys
+
+    @staticmethod
+    def _entry_key(content: str) -> str:
+        return hashlib.sha256(content.encode("utf-8")).hexdigest()[:24]
+
+    def _upsert_remote(self, target: str, content: str) -> str:
+        key = self._entry_key(content)
+        self._backend.upsert_memory(
+            namespace=target,
+            key=key,
+            value=content,
+            metadata={"source": "hermes-agent", "schema": "memory-v1"},
+        )
+        self._keys.setdefault(target, {})[content] = key
+        return key
+
+    def _delete_remote(self, target: str, content: str) -> None:
+        key = self._keys.get(target, {}).get(content) or self._entry_key(content)
+        self._backend.delete_memory(target, key)
+        self._keys.get(target, {}).pop(content, None)
+
+    def add(self, target: str, content: str) -> Dict[str, Any]:
+        content = content.strip()
+        if not content:
+            return {"success": False, "error": "Content cannot be empty."}
+        scan_error = _scan_memory_content(content)
+        if scan_error:
+            return {"success": False, "error": scan_error}
+
+        self._reload_target(target)
+        entries = self._entries_for(target)
+        if content in entries:
+            return self._success_response(target, "Entry already exists (no duplicate added).")
+        new_entries = entries + [content]
+        limit = self._char_limit(target)
+        new_total = len(ENTRY_DELIMITER.join(new_entries))
+        if new_total > limit:
+            current = self._char_count(target)
+            return {
+                "success": False,
+                "error": (
+                    f"Memory at {current:,}/{limit:,} chars. "
+                    f"Adding this entry ({len(content)} chars) would exceed the limit. "
+                    f"Replace or remove existing entries first."
+                ),
+                "current_entries": entries,
+                "usage": f"{current:,}/{limit:,}",
+            }
+        self._upsert_remote(target, content)
+        entries.append(content)
+        self._set_entries(target, entries)
+        return self._success_response(target, "Entry added.")
+
+    def replace(self, target: str, old_text: str, new_content: str) -> Dict[str, Any]:
+        old_text = old_text.strip()
+        new_content = new_content.strip()
+        if not old_text:
+            return {"success": False, "error": "old_text cannot be empty."}
+        if not new_content:
+            return {"success": False, "error": "new_content cannot be empty. Use 'remove' to delete entries."}
+        scan_error = _scan_memory_content(new_content)
+        if scan_error:
+            return {"success": False, "error": scan_error}
+
+        self._reload_target(target)
+        entries = self._entries_for(target)
+        matches = [(i, e) for i, e in enumerate(entries) if old_text in e]
+        if not matches:
+            return {"success": False, "error": f"No entry matched '{old_text}'."}
+        if len(matches) > 1 and len({e for _, e in matches}) > 1:
+            previews = [e[:80] + ("..." if len(e) > 80 else "") for _, e in matches]
+            return {
+                "success": False,
+                "error": f"Multiple entries matched '{old_text}'. Be more specific.",
+                "matches": previews,
+            }
+
+        idx = matches[0][0]
+        test_entries = entries.copy()
+        test_entries[idx] = new_content
+        limit = self._char_limit(target)
+        new_total = len(ENTRY_DELIMITER.join(test_entries))
+        if new_total > limit:
+            return {
+                "success": False,
+                "error": (
+                    f"Replacement would put memory at {new_total:,}/{limit:,} chars. "
+                    f"Shorten the new content or remove other entries first."
+                ),
+            }
+
+        old_content = entries[idx]
+        if old_content != new_content:
+            self._delete_remote(target, old_content)
+            self._upsert_remote(target, new_content)
+        entries[idx] = new_content
+        self._set_entries(target, entries)
+        return self._success_response(target, "Entry replaced.")
+
+    def remove(self, target: str, old_text: str) -> Dict[str, Any]:
+        old_text = old_text.strip()
+        if not old_text:
+            return {"success": False, "error": "old_text cannot be empty."}
+
+        self._reload_target(target)
+        entries = self._entries_for(target)
+        matches = [(i, e) for i, e in enumerate(entries) if old_text in e]
+        if not matches:
+            return {"success": False, "error": f"No entry matched '{old_text}'."}
+        if len(matches) > 1 and len({e for _, e in matches}) > 1:
+            previews = [e[:80] + ("..." if len(e) > 80 else "") for _, e in matches]
+            return {
+                "success": False,
+                "error": f"Multiple entries matched '{old_text}'. Be more specific.",
+                "matches": previews,
+            }
+
+        idx = matches[0][0]
+        old_content = entries.pop(idx)
+        self._delete_remote(target, old_content)
+        self._set_entries(target, entries)
+        return self._success_response(target, "Entry removed.")
+
+
 def memory_tool(
     action: str,
     target: str = "memory",
@@ -578,7 +752,6 @@ registry.register(
     check_fn=check_memory_requirements,
     emoji="🧠",
 )
-
 
 
 

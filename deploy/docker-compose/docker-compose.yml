@@ -96,9 +96,8 @@ services:
 
   router-service:
     build:
-      context: ../../services/router-service
+      context: ../../services/router
       dockerfile: Dockerfile
-      target: dev
     container_name: hermes-router-service
     ports:
       - "8002:8002"
@@ -111,6 +110,9 @@ services:
       - REDIS_DB=0
       - AUTH_SERVICE_URL=http://auth-service:8001
       - QUOTA_SERVICE_URL=http://quota-service:8003
+      - ROUTER_STATELESS_RUNTIME=true
+      - ROUTER_STATE_SERVICE_URL=http://state-service:8006
+      - ROUTER_STATE_SERVICE_TOKEN=${INTERNAL_API_KEY:-dev-state-key-change-in-prod}
       - LLM_PROXY_URL=http://litellm:4000
       - HERMES_POD_BASE_URL=http://hermes-agent:8642
       - K8S_ENABLED=false
@@ -118,7 +120,7 @@ services:
       - POD_IDLE_TTL_SECONDS=1800
       - LOG_LEVEL=DEBUG
     volumes:
-      - ../../services/router-service:/app:ro
+      - ../../services/router:/app:ro
       - router_service_data:/app/data
     depends_on:
       redis:
@@ -126,6 +128,8 @@ services:
       auth-service:
         condition: service_healthy
       quota-service:
+        condition: service_healthy
+      state-service:
         condition: service_healthy
       hermes-agent:
         condition: service_healthy
@@ -135,6 +139,38 @@ services:
       timeout: 10s
       retries: 5
       start_period: 30s
+    networks:
+      - hermes-network
+    restart: unless-stopped
+
+  state-service:
+    build:
+      context: ../../services/state-service
+      dockerfile: Dockerfile
+    container_name: hermes-state-service
+    ports:
+      - "8006:8006"
+    environment:
+      - STATE_HOST=0.0.0.0
+      - STATE_PORT=8006
+      - STATE_DEBUG=true
+      - STATE_DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-hermes}:${POSTGRES_PASSWORD:-hermes}@postgres:5432/${POSTGRES_DB:-hermes_platform}
+      - STATE_REDIS_URL=redis://redis:6379/0
+      - STATE_INTERNAL_API_KEY=${INTERNAL_API_KEY:-dev-state-key-change-in-prod}
+      - STATE_DEFAULT_TENANT_ID=default
+    volumes:
+      - ../../services/state-service:/app:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8006/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
     networks:
       - hermes-network
     restart: unless-stopped

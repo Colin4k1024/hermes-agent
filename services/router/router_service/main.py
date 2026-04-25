@@ -217,6 +217,9 @@ async def chat_completions(
     request: Request,
     authorization: str | None = Header(None, alias="Authorization"),
     x_user_id: str | None = Header(None, alias="X-User-ID"),
+    x_tenant_id: str | None = Header(None, alias="X-Tenant-ID"),
+    x_session_id: str | None = Header(None, alias="X-Session-ID"),
+    x_request_id: str | None = Header(None, alias="X-Request-ID"),
 ) -> StreamingResponse | JSONResponse:
     """Proxy /v1/chat/completions to the assigned Agent Pod.
 
@@ -231,19 +234,23 @@ async def chat_completions(
     4. Forward request to Pod :8642
     5. Stream response back (passthrough)
     """
-    user_id = x_user_id
+    user_id = x_user_id if not authorization else None
+    role = None
+    quota_group = None
     if not user_id and authorization:
         # Validate JWT via Auth Service
         try:
             async with httpx.AsyncClient() as client:
                 resp = await client.get(
-                    "http://auth-service:8001/auth/me",
+                    f"{settings.auth_service_url}/users/me",
                     headers={"Authorization": authorization},
                     timeout=5.0,
                 )
                 if resp.status_code == 200:
                     user_data = resp.json()
                     user_id = user_data.get("id")
+                    role = user_data.get("role")
+                    quota_group = user_data.get("quota_group") or role
                 else:
                     raise HTTPException(status_code=401, detail="Invalid token")
         except httpx.RequestError:
@@ -256,11 +263,28 @@ async def chat_completions(
         )
 
     # Get or assign pod
-    pod_id = rc.get_route(user_id)
+    route_subject = x_session_id or user_id
+    pod_id = rc.get_route(route_subject)
     if not pod_id:
         # Cold start
         route_resp = await route_request(
-            InternalRouteRequest(user_id=user_id, message="")
+            InternalRouteRequest(
+                user_id=user_id,
+                message="",
+                tenant_id=x_tenant_id or "default",
+                session_id=x_session_id,
+                request_id=x_request_id,
+                runtime_context={
+                    "tenant_id": x_tenant_id or "default",
+                    "user_id": user_id,
+                    "session_id": x_session_id,
+                    "request_id": x_request_id,
+                    "role": role,
+                    "quota_group": quota_group,
+                    "state_service_url": settings.state_service_url,
+                    "state_token": settings.state_service_token,
+                },
+            )
         )
         if not route_resp.success:
             raise HTTPException(status_code=503, detail=route_resp.message)
@@ -276,6 +300,12 @@ async def chat_completions(
     if authorization:
         headers["Authorization"] = authorization
     headers["X-User-ID"] = user_id
+    headers["X-Tenant-ID"] = x_tenant_id or "default"
+    if x_session_id:
+        headers["X-Session-ID"] = x_session_id
+    if x_request_id:
+        headers["X-Request-ID"] = x_request_id
+    headers["X-State-Service-URL"] = settings.state_service_url
 
     try:
         async with httpx.AsyncClient(timeout=120.0) as client:
@@ -300,6 +330,8 @@ async def chat_completions(
                     headers={
                         "x-pod-id": pod_id,
                         "x-user-id": user_id,
+                        "x-tenant-id": x_tenant_id or "default",
+                        "x-session-id": x_session_id or "",
                     },
                 )
 
@@ -308,6 +340,8 @@ async def chat_completions(
                 headers={
                     "x-pod-id": pod_id,
                     "x-user-id": user_id,
+                    "x-tenant-id": x_tenant_id or "default",
+                    "x-session-id": x_session_id or "",
                 },
             )
 
@@ -328,10 +362,20 @@ async def responses_endpoint(
     request: Request,
     authorization: str | None = Header(None, alias="Authorization"),
     x_user_id: str | None = Header(None, alias="X-User-ID"),
+    x_tenant_id: str | None = Header(None, alias="X-Tenant-ID"),
+    x_session_id: str | None = Header(None, alias="X-Session-ID"),
+    x_request_id: str | None = Header(None, alias="X-Request-ID"),
 ) -> StreamingResponse | JSONResponse:
     """Proxy /v1/responses to the assigned Agent Pod. Same flow as chat/completions."""
     # Delegate to the same logic
-    return await chat_completions(request, authorization, x_user_id)
+    return await chat_completions(
+        request,
+        authorization,
+        x_user_id,
+        x_tenant_id,
+        x_session_id,
+        x_request_id,
+    )
 
 
 @app.get(

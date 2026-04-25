@@ -14,6 +14,12 @@
 | **Launch Acceptance** | `2026-04-15-hermes-enterprise-saas/launch-acceptance.md` | ✅ Go | Phase 1 MVP 通过，所有 Critical 已修复 |
 | **Handoff** | `2026-04-15-hermes-enterprise-saas/handoffs/001-*.md` | ready-for-review | 执行团队交接 |
 
+## Hermes StateStore SaaS Implementation (2026-04-25)
+
+| 类型 | 文件 | 状态 | 说明 |
+|------|------|------|------|
+| **Implementation Changelog** | `2026-04-25-hermes-state-store-saas/CHANGELOG.md` | ✅ implemented | StateStore、State Service、Router stateless runtime、部署和测试记录 |
+
 ## ADRs
 
 | # | 文件 | 状态 | 决策 |
@@ -26,4 +32,4 @@
 
 ---
 
-*最后更新: 2026-04-17*
+*最后更新: 2026-04-25*

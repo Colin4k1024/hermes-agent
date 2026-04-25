@@ -1,18 +1,18 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: router-service
+  name: state-service
   namespace: hermes-platform
   labels:
     app: hermes
     tier: backend
-    component: router-service
+    component: state-service
 spec:
-  replicas: 3
+  replicas: 2
   selector:
     matchLabels:
       app: hermes
-      component: router-service
+      component: state-service
   strategy:
     type: RollingUpdate
     rollingUpdate:
@@ -23,66 +23,61 @@ spec:
       labels:
         app: hermes
         tier: backend
-        component: router-service
+        component: state-service
     spec:
-      serviceAccountName: router-service-sa
+      serviceAccountName: state-service-sa
       securityContext:
         runAsNonRoot: true
         runAsUser: 10000
         runAsGroup: 10000
         fsGroup: 10000
-      affinity:
-        podAntiAffinity:
-          preferredDuringSchedulingIgnoredDuringExecution:
-            - weight: 100
-              podAffinityTerm:
-                labelSelector:
-                  matchLabels:
-                    app: hermes
-                    component: router-service
-                topologyKey: kubernetes.io/hostname
       containers:
-        - name: router-service
-          image: hermes-router-service:v1.0.0  # TODO: Replace with actual image
+        - name: state-service
+          image: hermes-state-service:v1.0.0
           imagePullPolicy: Always
           ports:
-            - containerPort: 8002
+            - containerPort: 8006
               name: http
               protocol: TCP
           envFrom:
             - configMapRef:
-                name: router-service-cm
+                name: state-service-cm
           env:
-            - name: REDIS_HOST
-              value: "redis.hermes-platform.svc.cluster.local"
-            - name: ROUTER_STATE_SERVICE_TOKEN
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: auth-secret
+                  key: DATABASE_PASSWORD
+            - name: STATE_INTERNAL_API_KEY
               valueFrom:
                 secretKeyRef:
                   name: hermes-agent-secret
                   key: INTERNAL_API_KEY
+            - name: STATE_DATABASE_URL
+              value: "postgresql+asyncpg://hermes:$(POSTGRES_PASSWORD)@postgres.hermes-platform.svc.cluster.local:5432/hermes_platform"
           readinessProbe:
             httpGet:
-              path: /internal/health
-              port: 8002
-            initialDelaySeconds: 15
+              path: /health
+              port: 8006
+            initialDelaySeconds: 10
             periodSeconds: 10
             timeoutSeconds: 5
             failureThreshold: 3
           livenessProbe:
             httpGet:
-              path: /internal/health
-              port: 8002
-            initialDelaySeconds: 45
+              path: /health
+              port: 8006
+            initialDelaySeconds: 30
             periodSeconds: 30
             timeoutSeconds: 5
             failureThreshold: 3
           resources:
             requests:
-              cpu: 200m
-              memory: 512Mi
+              cpu: 100m
+              memory: 256Mi
             limits:
-              cpu: 1000m
-              memory: 1Gi
+              cpu: 500m
+              memory: 512Mi
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -99,23 +94,23 @@ spec:
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
-  name: router-service-pdb
+  name: state-service-pdb
   namespace: hermes-platform
   labels:
     app: hermes
-    component: router-service
+    component: state-service
 spec:
-  minAvailable: 2
+  minAvailable: 1
   selector:
     matchLabels:
       app: hermes
-      component: router-service
+      component: state-service
 ---
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: router-service-sa
+  name: state-service-sa
   namespace: hermes-platform
   labels:
     app: hermes
-    component: router-service
+    component: state-service

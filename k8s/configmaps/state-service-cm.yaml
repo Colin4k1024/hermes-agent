@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: state-service-cm
+  namespace: hermes-platform
+  labels:
+    app: hermes
+    tier: backend
+    component: state-service
+data:
+  STATE_HOST: "0.0.0.0"
+  STATE_PORT: "8006"
+  STATE_DEBUG: "false"
+  STATE_REDIS_URL: "redis://redis.hermes-platform.svc.cluster.local:6379/0"
+  STATE_DEFAULT_TENANT_ID: "default"

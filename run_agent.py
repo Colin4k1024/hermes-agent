@@ -605,6 +605,8 @@ class AIAgent:
         skip_context_files: bool = False,
         skip_memory: bool = False,
         session_db=None,
+        runtime_context: Dict[str, Any] = None,
+        state_store=None,
         parent_session_id: str = None,
         iteration_budget: "IterationBudget" = None,
         fallback_model: Dict[str, Any] = None,
@@ -652,8 +654,36 @@ class AIAgent:
             skip_context_files (bool): If True, skip auto-injection of SOUL.md, AGENTS.md, and .cursorrules
                 into the system prompt. Use this for batch processing and data generation to avoid
                 polluting trajectories with user-specific persona or project instructions.
+            runtime_context (Dict): Enterprise stateless runtime context containing tenant_id,
+                user_id, session_id, request_id, role, quota_group, and state_token.
+            state_store: Optional StateStore implementation. When provided, session/config
+                state is read from this store instead of local HERMES_HOME-backed defaults.
         """
         _install_safe_stdio()
+
+        from agent.state_store import RemoteStateStore, RuntimeContext
+
+        self.runtime_context = RuntimeContext.from_mapping(runtime_context)
+        if not self.runtime_context.user_id and user_id:
+            self.runtime_context = RuntimeContext.from_mapping({
+                **self.runtime_context.__dict__,
+                "user_id": user_id,
+            })
+        if not self.runtime_context.session_id and session_id:
+            self.runtime_context = RuntimeContext.from_mapping({
+                **self.runtime_context.__dict__,
+                "session_id": session_id,
+            })
+        if state_store is None and os.getenv("HERMES_STATE_MODE", "").lower() == "remote":
+            state_url = os.getenv("HERMES_STATE_SERVICE_URL", "").strip()
+            state_token = os.getenv("HERMES_STATE_SERVICE_TOKEN", "").strip()
+            if state_url:
+                ctx_payload = {
+                    **self.runtime_context.__dict__,
+                    "state_token": self.runtime_context.state_token or state_token,
+                }
+                state_store = RemoteStateStore(state_url, ctx_payload)
+        self.state_store = state_store
 
         self.model = model
         self.max_iterations = max_iterations
@@ -666,7 +696,7 @@ class AIAgent:
         self.quiet_mode = quiet_mode
         self.ephemeral_system_prompt = ephemeral_system_prompt
         self.platform = platform  # "cli", "telegram", "discord", "whatsapp", etc.
-        self._user_id = user_id  # Platform user identifier (gateway sessions)
+        self._user_id = self.runtime_context.user_id or user_id  # Platform user identifier (gateway sessions)
         # Pluggable print function — CLI replaces this with _cprint so that
         # raw ANSI status lines are routed through prompt_toolkit's renderer
         # instead of going directly to stdout where patch_stdout's StdoutProxy
@@ -1138,7 +1168,9 @@ class AIAgent:
         
         # Session logging setup - auto-save conversation trajectories for debugging
         self.session_start = datetime.now()
-        if session_id:
+        if self.runtime_context.session_id and not session_id:
+            self.session_id = self.runtime_context.session_id
+        elif session_id:
             # Use provided session ID (e.g., from CLI)
             self.session_id = session_id
         else:
@@ -1148,8 +1180,11 @@ class AIAgent:
             self.session_id = f"{timestamp_str}_{short_uuid}"
         
         # Session logs go into ~/.hermes/sessions/ alongside gateway sessions
-        hermes_home = get_hermes_home()
-        self.logs_dir = hermes_home / "sessions"
+        if self.state_store is not None:
+            self.logs_dir = Path(tempfile.gettempdir()) / "hermes-agent" / "sessions"
+        else:
+            hermes_home = get_hermes_home()
+            self.logs_dir = hermes_home / "sessions"
         self.logs_dir.mkdir(parents=True, exist_ok=True)
         self.session_log_file = self.logs_dir / f"session_{self.session_id}.json"
         
@@ -1167,7 +1202,7 @@ class AIAgent:
         )
         
         # SQLite session store (optional -- provided by CLI or gateway)
-        self._session_db = session_db
+        self._session_db = getattr(self.state_store, "sessions", None) or session_db
         self._parent_session_id = parent_session_id
         self._last_flushed_db_idx = 0  # tracks DB-write cursor to prevent duplicate writes
         if self._session_db:
@@ -1181,7 +1216,7 @@ class AIAgent:
                         "reasoning_config": reasoning_config,
                         "max_tokens": max_tokens,
                     },
-                    user_id=None,
+                    user_id=self.runtime_context.user_id or self._user_id,
                     parent_session_id=self._parent_session_id,
                 )
             except Exception as e:
@@ -1201,8 +1236,11 @@ class AIAgent:
         
         # Load config once for memory, skills, and compression sections
         try:
-            from hermes_cli.config import load_config as _load_agent_config
-            _agent_cfg = _load_agent_config()
+            if self.state_store is not None:
+                _agent_cfg = self.state_store.config.get_effective_config()
+            else:
+                from hermes_cli.config import load_config as _load_agent_config
+                _agent_cfg = _load_agent_config()
         except Exception:
             _agent_cfg = {}
 
@@ -1222,11 +1260,19 @@ class AIAgent:
                 self._memory_nudge_interval = int(mem_config.get("nudge_interval", 10))
                 self._memory_flush_min_turns = int(mem_config.get("flush_min_turns", 6))
                 if self._memory_enabled or self._user_profile_enabled:
-                    from tools.memory_tool import MemoryStore
-                    self._memory_store = MemoryStore(
-                        memory_char_limit=mem_config.get("memory_char_limit", 2200),
-                        user_char_limit=mem_config.get("user_char_limit", 1375),
-                    )
+                    if self.state_store is not None:
+                        from tools.memory_tool import RemoteMemoryStore
+                        self._memory_store = RemoteMemoryStore(
+                            self.state_store.memory,
+                            memory_char_limit=mem_config.get("memory_char_limit", 2200),
+                            user_char_limit=mem_config.get("user_char_limit", 1375),
+                        )
+                    else:
+                        from tools.memory_tool import MemoryStore
+                        self._memory_store = MemoryStore(
+                            memory_char_limit=mem_config.get("memory_char_limit", 2200),
+                            user_char_limit=mem_config.get("user_char_limit", 1375),
+                        )
                     self._memory_store.load_from_disk()
             except Exception:
                 pass  # Memory is optional -- don't break agent init
@@ -2345,6 +2391,8 @@ class AIAgent:
                         quiet_mode=True,
                         platform=self.platform,
                         provider=self.provider,
+                        runtime_context=self.runtime_context.__dict__,
+                        state_store=self.state_store,
                     )
                     review_agent._memory_store = self._memory_store
                     review_agent._memory_enabled = self._memory_enabled
