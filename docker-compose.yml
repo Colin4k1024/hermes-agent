@@ -12,7 +12,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U hermes"]
+      test: ["CMD-SHELL", "pg_isready -U hermes -d hermes_platform"]
       interval: 3s
       timeout: 5s
       retries: 10

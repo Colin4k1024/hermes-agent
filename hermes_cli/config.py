@@ -2541,12 +2541,19 @@ def read_raw_config() -> Dict[str, Any]:
     return {}
 
 
-def load_config() -> Dict[str, Any]:
+def load_config(user_id: str | None = None) -> Dict[str, Any]:
     """Load configuration from remote State Service or local ~/.hermes/config.yaml.
 
     In SaaS mode (HERMES_STATE_MODE=remote with HERMES_STATE_URL set), the config
     is loaded from the remote State Service. Falls back to local config.yaml
     for development mode or when the remote service is unavailable.
+
+    Args:
+        user_id: Optional user ID to use for the remote config request. Useful for
+            gateway / agent callers that have a ``RuntimeContext`` but have not yet
+            exported the user identity to ``HERMES_USER_ID``.  When omitted the
+            function falls back to the ``HERMES_USER_ID`` environment variable; if
+            neither is set the remote config attempt is skipped silently.
     """
     import copy
 
@@ -2556,7 +2563,7 @@ def load_config() -> Dict[str, Any]:
 
     if state_mode == "remote" and state_url:
         # SaaS mode: try to load config from remote State Service
-        config = _load_remote_config(state_url)
+        config = _load_remote_config(state_url, user_id=user_id)
         if config is not None:
             return _expand_env_vars(_normalize_root_model_keys(_normalize_max_turns_config(config)))
 
@@ -2588,18 +2595,31 @@ def load_config() -> Dict[str, Any]:
     return _expand_env_vars(_normalize_root_model_keys(_normalize_max_turns_config(config)))
 
 
-def _load_remote_config(state_url: str) -> Dict[str, Any] | None:
+def _load_remote_config(state_url: str, user_id: str | None = None) -> Dict[str, Any] | None:
     """Attempt to load config from the remote State Service.
 
     Returns None if the remote service is unavailable or returns an error.
     This is best-effort — callers should fall back to local config on failure.
+
+    Args:
+        state_url: Base URL of the State Service.
+        user_id: Optional user ID override. Falls back to ``HERMES_USER_ID`` env var.
+            If no user ID is available the request is skipped — the State Service
+            requires a non-empty X-User-ID header and would return 400 otherwise.
     """
     import httpx
+
+    resolved_user_id = (user_id or os.getenv("HERMES_USER_ID", "")).strip()
+    if not resolved_user_id:
+        # Cannot make a valid request without a user identity; skip silently so
+        # global load_config() calls (tool loading, initialisation, etc.) do not
+        # generate spurious 400 errors before a session/user context is available.
+        return None
 
     state_token = os.getenv("HERMES_STATE_SERVICE_TOKEN", "").strip()
     headers = {
         "X-Tenant-ID": os.getenv("HERMES_TENANT_ID", "default"),
-        "X-User-ID": os.getenv("HERMES_USER_ID", ""),
+        "X-User-ID": resolved_user_id,
     }
     if state_token:
         headers["Authorization"] = f"Bearer {state_token}"
