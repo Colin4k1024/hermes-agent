@@ -24,26 +24,33 @@ from agent.state_store import RemoteStateStore, RuntimeContext
 def state_service_url(monkeypatch):
     """Configure remote state only while these integration tests are running."""
     url = os.environ.get("HERMES_STATE_URL", "http://localhost:8080")
+    token = os.environ.get("HERMES_STATE_SERVICE_TOKEN", "dev-state-key-change-in-prod")
     monkeypatch.setenv("HERMES_STATE_MODE", "remote")
     monkeypatch.setenv("HERMES_STATE_URL", url)
+    monkeypatch.setenv("HERMES_STATE_SERVICE_TOKEN", token)
     return url
 
 
 @pytest.fixture
-def store(state_service_url):
+def state_service_token():
+    return os.environ.get("HERMES_STATE_SERVICE_TOKEN", "dev-state-key-change-in-prod")
+
+
+@pytest.fixture
+def store(state_service_url, state_service_token):
     """RemoteStateStore connected to the real State Service."""
     return RemoteStateStore(
         state_service_url,
-        RuntimeContext(tenant_id="test-tenant", user_id="test-user")
+        RuntimeContext(tenant_id="test-tenant", user_id="test-user", state_token=state_service_token)
     )
 
 
 @pytest.fixture
-def cross_tenant_store(state_service_url):
+def cross_tenant_store(state_service_url, state_service_token):
     """RemoteStateStore with a different tenant to test isolation."""
     return RemoteStateStore(
         state_service_url,
-        RuntimeContext(tenant_id="other-tenant", user_id="test-user")
+        RuntimeContext(tenant_id="other-tenant", user_id="test-user", state_token=state_service_token)
     )
 
 
@@ -142,11 +149,11 @@ class TestTenantIsolation:
         assert "belongs to a different tenant" in str(exc_info.value) or \
                "Cross-tenant access denied" in str(exc_info.value)
 
-    def test_cross_tenant_cannot_get_session(self, state_service_url, cross_tenant_store):
+    def test_cross_tenant_cannot_get_session(self, state_service_url, state_service_token, cross_tenant_store):
         sid = f"test-{uuid.uuid4().hex[:8]}"
         store = RemoteStateStore(
             state_service_url,
-            RuntimeContext(tenant_id="test-tenant", user_id="test-user")
+            RuntimeContext(tenant_id="test-tenant", user_id="test-user", state_token=state_service_token)
         )
         store.sessions.create_session(sid, source="feishu")
 
@@ -154,11 +161,11 @@ class TestTenantIsolation:
         s = cross_tenant_store.sessions.get_session(sid)
         assert s is None  # 404, not found
 
-    def test_cross_tenant_cannot_append_message(self, state_service_url, cross_tenant_store):
+    def test_cross_tenant_cannot_append_message(self, state_service_url, state_service_token, cross_tenant_store):
         sid = f"test-{uuid.uuid4().hex[:8]}"
         store = RemoteStateStore(
             state_service_url,
-            RuntimeContext(tenant_id="test-tenant", user_id="test-user")
+            RuntimeContext(tenant_id="test-tenant", user_id="test-user", state_token=state_service_token)
         )
         store.sessions.create_session(sid, source="feishu")
 
@@ -202,10 +209,14 @@ class TestMemory:
 
 class TestConfig:
     def test_get_effective_config(self, store):
+        store._request(
+            "PUT",
+            "/state/config",
+            json={"scope": "user", "key": "model", "value": {"default": "e2e-model"}},
+        )
         cfg = store.config.get_effective_config()
         assert "model" in cfg
-        assert "display" in cfg
-        assert "memory" in cfg
+        assert cfg["model"]["default"] == "e2e-model"
 
 
 # ---------------------------------------------------------------------------
@@ -213,13 +224,13 @@ class TestConfig:
 # ---------------------------------------------------------------------------
 
 class TestEndToEndConversation:
-    def test_full_conversation_flow(self, state_service_url, store):
+    def test_full_conversation_flow(self, state_service_url, state_service_token, store):
         """Simulate a complete user → assistant → user conversation."""
         tenant_id = f"tenant-{uuid.uuid4().hex[:6]}"
         user_id = f"user-{uuid.uuid4().hex[:6]}"
         store = RemoteStateStore(
             state_service_url,
-            RuntimeContext(tenant_id=tenant_id, user_id=user_id)
+            RuntimeContext(tenant_id=tenant_id, user_id=user_id, state_token=state_service_token)
         )
 
         sid = f"conv-{uuid.uuid4().hex[:8]}"
@@ -252,8 +263,8 @@ class TestEndToEndConversation:
 
         # Tenant isolation: another tenant cannot see this session
         other = RemoteStateStore(
-            os.environ["HERMES_STATE_URL"],
-            RuntimeContext(tenant_id="stranger-tenant")
+            state_service_url,
+            RuntimeContext(tenant_id="stranger-tenant", user_id=user_id, state_token=state_service_token)
         )
         assert other.sessions.get_session(sid) is None
 

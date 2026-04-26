@@ -23,16 +23,25 @@ pytestmark = pytest.mark.integration
 def state_service_url(monkeypatch):
     """Configure the live state service URL only for integration test execution."""
     url = os.environ.get("HERMES_STATE_URL", "http://localhost:8080")
+    token = os.environ.get("HERMES_STATE_SERVICE_TOKEN", "dev-state-key-change-in-prod")
     monkeypatch.setenv("HERMES_STATE_MODE", "remote")
     monkeypatch.setenv("HERMES_STATE_URL", url)
+    monkeypatch.setenv("HERMES_STATE_SERVICE_TOKEN", token)
     return url
 
 
 @pytest.fixture
-def remote_state_env(state_service_url, monkeypatch):
+def remote_state_env(state_service_url, monkeypatch, tmp_path):
     """Configure AIAgent to use RemoteStateStore for a single test."""
-    monkeypatch.delenv("HERMES_HOME", raising=False)
+    hermes_home = tmp_path / "hermes_home"
+    (hermes_home / "logs").mkdir(parents=True)
+    monkeypatch.setenv("HERMES_HOME", str(hermes_home))
     return state_service_url
+
+
+@pytest.fixture
+def state_service_token():
+    return os.environ.get("HERMES_STATE_SERVICE_TOKEN", "dev-state-key-change-in-prod")
 
 
 class TestFeishuEventToRemoteStateStore:
@@ -91,13 +100,13 @@ class TestFeishuEventToRemoteStateStore:
         assert agent.runtime_context is not None
         assert agent.runtime_context.tenant_id == "tenant-test"
 
-    def test_remote_state_store_uses_tenant_context(self, state_service_url):
+    def test_remote_state_store_uses_tenant_context(self, state_service_url, state_service_token):
         """Verify RemoteStateStore sends correct tenant headers."""
         from agent.state_store import RemoteStateStore, RuntimeContext
 
         store = RemoteStateStore(
             state_service_url,
-            RuntimeContext(tenant_id="tenant-abc", user_id="user-123")
+            RuntimeContext(tenant_id="tenant-abc", user_id="user-123", state_token=state_service_token)
         )
 
         headers = store._auth_headers()
@@ -114,6 +123,7 @@ class TestFeishuEventToRemoteStateStore:
 
         agent = AIAgent(
             model="claude-sonnet-4",
+            platform="feishu",
             runtime_context={
                 "tenant_id": tenant_id,
                 "user_id": user_id,
@@ -128,17 +138,17 @@ class TestFeishuEventToRemoteStateStore:
         assert s["tenant_id"] == tenant_id, f"Wrong tenant: expected {tenant_id}, got {s.get('tenant_id')}"
         assert s["source"] == "feishu", f"Wrong source: expected feishu, got {s.get('source')}"
 
-    def test_cross_tenant_isolation_in_gateway_flow(self, state_service_url):
+    def test_cross_tenant_isolation_in_gateway_flow(self, state_service_url, state_service_token):
         """Tenant A's session must not be accessible by Tenant B."""
         from agent.state_store import RemoteStateStore, RuntimeContext
 
         tenant_a = RemoteStateStore(
             state_service_url,
-            RuntimeContext(tenant_id="tenant-a")
+            RuntimeContext(tenant_id="tenant-a", user_id="test-user", state_token=state_service_token)
         )
         tenant_b = RemoteStateStore(
             state_service_url,
-            RuntimeContext(tenant_id="tenant-b")
+            RuntimeContext(tenant_id="tenant-b", user_id="test-user", state_token=state_service_token)
         )
 
         # Tenant A creates a session

@@ -473,33 +473,65 @@ Always run the full suite before pushing changes.
 <claude-mem-context>
 # Memory Context
 
-# [hermes-agent] recent context, 2026-04-25 8:42pm GMT+8
+# [hermes-agent] recent context, 2026-04-26 8:47pm GMT+8
 
 Legend: 🎯session 🔴bugfix 🟣feature 🔄refactor ✅change 🔵discovery ⚖️decision
 Format: ID TIME TYPE TITLE
 Fetch details: get_observations([IDs]) | Search: mem-search skill
 
-Stats: 18 obs (3,654t read) | 750,800t work | 100% savings
+Stats: 50 obs (11,401t read) | 513,680t work | 98% savings
 
-### Apr 25, 2026
-386 1:16p ⚖️ Project direction shift: SaaS化改造讨论启动
-387 1:17p 🔵 hermes-agent 微服务架构发现
-388 " 🔵 现有安全与审计机制
-389 1:18p 🔵 认证服务完整技术栈发现
-390 " 🔵 路由服务智能调度机制
-391 " 🔵 配额服务双层计数架构
-392 " 🔵 部署架构完整技术栈
-393 " ⚖️ SaaS化改造方向确定：单企业私有化+飞书优先
-394 " 🟣 飞书身份认证强化需求
-395 " 🔵 现有飞书集成能力盘点
-396 1:22p ⚖️ SaaS化改造项目启动
-397 1:23p 🔵 hermes-agent 架构深度分析
-398 " 🔵 AIAgent 初始化架构详解
-399 1:24p 🔵 发现已有 SaaS 架构：Pod 池化路由系统
-400 " 🔵 Skills Registry Service 和 Redis 路由实现
-401 " 🔵 SessionDB 会话存储接口详析
-402 1:25p 🟣 实现 StateStore 抽象层支持无状态运行时
-403 1:28p 🟣 实现 State Service 微服务
+### Apr 26, 2026
+445 8:13p 🔴 Fix verified: integration tests now properly excluded from default pytest runs
+440 " 🔵 Parallel Agents Spawned to Fix Code Review Findings
+441 " 🔵 Review Finding: Missing Production Endpoint for Tenant Validation
+442 " 🔵 Review Finding: Unsanitized Path Component in Stateless Mode
+443 " 🔵 Review Finding: Weak Default Token in Production
+444 " 🔵 Review Finding: Tests Pollute Global Environment State
+446 " 🔵 Parallel Agent Fixes Timed Out Waiting
+447 " 🔵 Both integration test files are untracked new additions to the repo
+448 " 🔴 Added /state/sessions/{session_id}/metadata Endpoint
+449 " 🔴 Sanitized Route Subject in Stateless Hermes Home Path
+450 " 🔴 Required Explicit Internal API Key for Production
+451 8:14p 🔴 Fixed Integration Test Environment Pollution
+452 " 🔴 Path Traversal Fix Verified and Complete
+453 8:17p 🔵 Two Agents Still Processing After Second Timeout
+454 " 🔵 State Store and Schema Tests Pass
+455 " 🔵 Integration Tests Properly Excluded
+456 " 🔵 State Service Config Verification Requires Service Venv
+457 " 🔵 All Review Fixes Applied to Working Directory
+458 8:20p 🔴 Code review fixed 4 security and quality issues in hermes-agent
+459 8:21p 🔵 uv cache permission error blocks state-service test run
+460 " 🔴 State-service tests have dependency resolution issues
+461 " ✅ State-service dev dependencies being installed via uv extra
+462 " 🔵 State-service tests: 2 pass, 4 fail due to missing greenlet and alembic path
+463 8:22p 🔴 Fixed test infrastructure: added greenlet dep and absolute alembic paths
+464 " ✅ All 6 state-service tests now pass
+465 " ✅ Main repo unit tests pass: 6 tests for state_store and stateless_runtime_schemas
+466 8:23p 🔵 Integration test markers work correctly; redis mock fixture broken
+467 " 🔵 Router test requires redis module not installed in hermes-agent venv
+468 " 🔵 Router service has pytest version conflict in dev dependencies
+469 " 🔴 Implemented missing /state/sessions/{session_id}/metadata endpoint
+470 " ✅ Code review complete - all fixes applied and ready to commit
+471 " 🟣 Implemented /state/sessions/{session_id}/metadata endpoint for tenant validation
+472 8:24p ✅ Complete code review diff summary - 11 files changed
+473 " 🔴 Fixed session metadata isolation - same tenant multi-user collaboration
+474 " 🔴 Import pollution test confirms HERMES_STATE_MODE no longer set at import time
+475 8:25p ✅ Code review complete - 13 files modified, all tests verified
+476 8:26p ✅ Code review fixes committed to dev branch
+477 8:27p ✅ Code review fixes pushed to origin/dev
+478 " ✅ New plan: E2E testing of SaaS/State Service
+479 8:28p ✅ Starting local State Service test stack with Docker Compose
+480 " 🔵 Docker container naming conflict prevents startup
+481 8:29p 🔵 Docker permission denied in sandbox environment
+482 " 🔵 State service test stack already running
+483 " ✅ Running integration tests against live state-service
+484 " 🔵 Integration tests failing due to sandbox environment restrictions
+485 8:30p ✅ E2E smoke test passed - RemoteStateStore connects to state-service successfully
+486 " 🔴 Fixed integration test fixtures for state_service_token and hermes_home
+487 " ✅ Integration tests improved: 20 passed, 3 failed
+488 8:31p 🔵 Tenant isolation correctly implemented - metadata endpoint and _validate_tenant working
+489 8:32p ✅ ALL 23 integration tests PASSED
 
-Access 751k tokens of past work via get_observations([IDs]) or mem-search skill.
+Access 514k tokens of past work via get_observations([IDs]) or mem-search skill.
 </claude-mem-context>

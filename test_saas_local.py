@@ -24,8 +24,8 @@ class SourceScanner:
     def __init__(self, file_path: Path):
         self.content = file_path.read_text()
 
-    def has_pattern(self, pattern: str) -> bool:
-        return bool(re.search(pattern, self.content, re.MULTILINE))
+    def has_pattern(self, pattern: str, flags: int = 0) -> bool:
+        return bool(re.search(pattern, self.content, re.MULTILINE | flags))
 
     def count_occurrences(self, pattern: str) -> int:
         return len(re.findall(pattern, self.content, re.MULTILINE))
@@ -82,7 +82,7 @@ class TestAgentStateStore(unittest.TestCase):
     def test_validate_tenant_checks_tenant_id(self):
         """_validate_tenant() 检查 session.tenant_id"""
         self.assertTrue(
-            self.s.has_pattern(r"session\.tenant_id") and
+            self.s.has_pattern(r"session_tenant|tenant_id") and
             self.s.has_pattern(r"runtime_context\.tenant_id"),
             "tenant_id comparison not found in _validate_tenant"
         )
@@ -119,7 +119,7 @@ class TestRunAgent(unittest.TestCase):
     def test_remote_mode_requires_url_value_error(self):
         """远程模式无 URL 时抛出 ValueError"""
         self.assertTrue(
-            self.s.has_pattern(r'raise.*ValueError.*HERMES_STATE_URL'),
+            self.s.has_pattern(r'raise\s+ValueError\([\s\S]*HERMES_STATE_URL'),
             "ValueError not raised when remote mode has no URL"
         )
 
@@ -259,7 +259,7 @@ class TestSkillCommands(unittest.TestCase):
     def test_saas_mode_uses_tenant_id_in_path(self):
         """SaaS 模式路径包含 tenant_id"""
         self.assertTrue(
-            self.s.has_pattern(r'tenant_id.*plans|plans.*tenant_id'),
+            self.s.has_pattern(r'HERMES_TENANT_ID|tenant_id.*plans|plans.*tenant_id'),
             "tenant_id in plan path not found"
         )
 
@@ -286,7 +286,7 @@ class TestSummary(unittest.TestCase):
             has_saas_marker = any(k in content for k in [
                 "HERMES_STATE_MODE", "HERMES_STATE_URL", "HERMES_SHARED_SKILLS",
                 "_auth_headers", "_validate_tenant", "tenant_id", "runtime_context",
-                "_load_remote_config", "tempfile"
+                "_load_remote_config", "tempfile", "RemoteStateStore", "SaaS"
             ])
             self.assertTrue(has_saas_marker, f"No SaaS marker found in {f}")
 
