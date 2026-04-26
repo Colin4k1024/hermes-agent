@@ -1,0 +1,39 @@
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: hermes-state-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: hermes
+      POSTGRES_PASSWORD: hermes_dev_password
+      POSTGRES_DB: hermes_platform
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hermes"]
+      interval: 3s
+      timeout: 5s
+      retries: 10
+
+  state-service:
+    build:
+      context: ./services/state-service
+      dockerfile: Dockerfile
+    container_name: hermes-state-service
+    restart: unless-stopped
+    environment:
+      STATE_DEBUG: "true"
+      STATE_INTERNAL_API_KEY: "dev-state-key-change-in-prod"
+      STATE_DATABASE_URL: "postgresql+asyncpg://hermes:hermes_dev_password@postgres:5432/hermes_platform"
+      STATE_HOST: "0.0.0.0"
+      STATE_PORT: "8006"
+    ports:
+      - "8006:8006"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
