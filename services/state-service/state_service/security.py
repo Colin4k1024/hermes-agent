@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import hmac
+import uuid
+
 from fastapi import Header, HTTPException, status
 
 from state_service.config import settings
@@ -17,7 +20,7 @@ def get_request_context(
 ) -> RequestContext:
     """Validate caller and bind every operation to tenant/user context."""
     expected = f"Bearer {settings.internal_api_key}"
-    if authorization != expected:
+    if not hmac.compare_digest(authorization or "", expected):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid state service token",
@@ -31,5 +34,5 @@ def get_request_context(
         tenant_id=x_tenant_id or settings.default_tenant_id,
         user_id=x_user_id,
         session_id=x_session_id,
-        request_id=x_request_id,
+        request_id=x_request_id or str(uuid.uuid4()),
     )

@@ -23,21 +23,21 @@ class EffectiveConfigResponse(BaseModel):
 
 
 class ConfigUpsertRequest(BaseModel):
-    scope: str = "user"
-    key: str
+    scope: str = Field(default="user", max_length=32)
+    key: str = Field(max_length=256)
     value: dict[str, Any] = Field(default_factory=dict)
 
 
 class SessionCreateRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
-    session_id: str
-    source: str
-    model: str | None = None
+    session_id: str = Field(max_length=128)
+    source: str = Field(max_length=64)
+    model: str | None = Field(default=None, max_length=128)
     model_config_data: dict[str, Any] | None = Field(default=None, alias="model_config")
     system_prompt: str | None = None
-    user_id: str | None = None
-    parent_session_id: str | None = None
+    user_id: str | None = Field(default=None, max_length=256)
+    parent_session_id: str | None = Field(default=None, max_length=128)
 
 
 class SessionPatchRequest(BaseModel):
@@ -78,7 +78,7 @@ class SessionMetadataResponse(BaseModel):
 
 
 class MessageCreateRequest(BaseModel):
-    role: str
+    role: str = Field(max_length=32)
     content: str | None = Field(default=None, max_length=131072)
     tool_name: str | None = None
     tool_calls: Any = None
@@ -129,7 +129,7 @@ class EndSessionRequest(BaseModel):
 
 
 class MemoryUpsertRequest(BaseModel):
-    value: str
+    value: str = Field(max_length=65536)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 

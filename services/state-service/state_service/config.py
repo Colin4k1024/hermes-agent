@@ -21,7 +21,7 @@ class Settings(BaseSettings):
 
     database_url: str = "postgresql+asyncpg://hermes:hermes@localhost:5432/hermes_platform"
     db_pool_size: int = 10
-    auto_create_schema: bool = True
+    auto_create_schema: bool = False
     expected_migration_revision: str = "20260425_0001"
 
     redis_url: str = "redis://localhost:6379/0"

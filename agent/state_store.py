@@ -296,6 +296,7 @@ class _RemoteSessionStore:
                        finish_reason: str = None, reasoning: str = None,
                        reasoning_details: Any = None,
                        codex_reasoning_items: Any = None) -> int:
+        self._root._validate_tenant(session_id)
         data = self._root._request("POST", f"/state/sessions/{session_id}/messages", json={
             "role": role,
             "content": content,
@@ -325,10 +326,12 @@ class _RemoteSessionStore:
         return session.get("title")
 
     def set_session_title(self, session_id: str, title: str) -> bool:
+        self._root._validate_tenant(session_id)
         self._root._request("PATCH", f"/state/sessions/{session_id}", json={"title": title})
         return True
 
     def get_messages_as_conversation(self, session_id: str) -> list[dict[str, Any]]:
+        self._root._validate_tenant(session_id)
         data = self._root._request("GET", f"/state/sessions/{session_id}/messages")
         return data.get("messages", [])
 
@@ -357,6 +360,7 @@ class _RemoteSessionStore:
         return data.get("results", [])
 
     def end_session(self, session_id: str, end_reason: str) -> None:
+        self._root._validate_tenant(session_id)
         self._root._request("POST", f"/state/sessions/{session_id}/end", json={"end_reason": end_reason})
 
     def reopen_session(self, session_id: str) -> None:
