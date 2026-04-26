@@ -79,7 +79,7 @@ class SessionMetadataResponse(BaseModel):
 
 class MessageCreateRequest(BaseModel):
     role: str
-    content: str | None = None
+    content: str | None = Field(default=None, max_length=131072)
     tool_name: str | None = None
     tool_calls: Any = None
     tool_call_id: str | None = None

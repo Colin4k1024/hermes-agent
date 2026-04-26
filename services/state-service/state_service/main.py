@@ -311,7 +311,7 @@ async def get_session_metadata(
     db: AsyncSession = Depends(db_dep),
 ) -> SessionMetadataResponse:
     session = await db.get(Session, session_id)
-    if session is None or session.user_id != ctx.user_id:
+    if session is None or session.tenant_id != ctx.tenant_id or session.user_id != ctx.user_id:
         raise HTTPException(status_code=404, detail="Session not found")
     await _audit(db, ctx, "read", "session_metadata", session_id, session_id=session_id)
     return _session_to_metadata_response(session)

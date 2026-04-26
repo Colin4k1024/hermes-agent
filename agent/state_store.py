@@ -185,9 +185,11 @@ class RemoteStateStore:
 
     def _headers(self) -> dict[str, str]:
         ctx = self.runtime_context
+        if not ctx.user_id:
+            raise RuntimeError("RemoteStateStore requires user_id in RuntimeContext")
         headers = {
             "X-Tenant-ID": ctx.tenant_id,
-            "X-User-ID": ctx.user_id or "",
+            "X-User-ID": ctx.user_id,
         }
         if ctx.session_id:
             headers["X-Session-ID"] = ctx.session_id
@@ -204,9 +206,11 @@ class RemoteStateStore:
         are not yet available or not needed.
         """
         ctx = self.runtime_context
+        if not ctx.user_id:
+            raise RuntimeError("RemoteStateStore requires user_id in RuntimeContext")
         headers = {
             "X-Tenant-ID": ctx.tenant_id,
-            "X-User-ID": ctx.user_id or "",
+            "X-User-ID": ctx.user_id,
         }
         if ctx.state_token:
             headers["Authorization"] = f"Bearer {ctx.state_token}"
@@ -307,6 +311,7 @@ class _RemoteSessionStore:
         return int(data.get("id", 0))
 
     def get_session(self, session_id: str) -> dict[str, Any] | None:
+        self._root._validate_tenant(session_id)
         try:
             return self._root._request("GET", f"/state/sessions/{session_id}")
         except Exception as exc:

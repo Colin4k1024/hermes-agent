@@ -132,3 +132,15 @@ def test_remote_state_store_validate_tenant_rejects_owner_mismatch(monkeypatch):
             raise AssertionError("Expected tenant mismatch to raise PermissionError")
     finally:
         store.close()
+
+
+def test_remote_state_store_headers_require_user_id():
+    store = RemoteStateStore(
+        "http://state-service",
+        RuntimeContext(tenant_id="corp", user_id=None, state_token="tok"),
+    )
+    try:
+        with pytest.raises(RuntimeError, match="requires user_id"):
+            store._headers()
+    finally:
+        store.close()

@@ -8580,7 +8580,7 @@ class GatewayRunner:
                 # Extract tenant_id from Feishu event if available.
                 # Feishu events have tenant_key in event.header.tenant_key.
                 # For other platforms, defaults to "default" tenant.
-                tenant_id = "default"
+                tenant_id = os.getenv("HERMES_TENANT_ID", "default")
                 raw_msg = getattr(event, "raw_message", None)
                 if raw_msg is not None:
                     # Try Feishu-style nested event structure

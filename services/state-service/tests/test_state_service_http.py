@@ -80,8 +80,7 @@ def test_state_service_http_flow_and_user_isolation(tmp_path):
 
             other_tenant_headers = {**headers, "X-Tenant-ID": "other-corp"}
             owner_metadata = await client.get("/state/sessions/s-1/metadata", headers=other_tenant_headers)
-            assert owner_metadata.status_code == 200
-            assert owner_metadata.json()["tenant_id"] == "corp"
+            assert owner_metadata.status_code == 404
 
             unauthenticated = await client.get("/state/config/effective", headers={"X-User-ID": "u-1"})
             assert unauthenticated.status_code == 401
