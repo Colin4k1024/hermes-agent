@@ -146,7 +146,11 @@ class _UnavailableCacheStore:
 
 
 class RemoteStateStore:
-    """Synchronous client used by the currently synchronous AIAgent loop."""
+    """Synchronous client used by the currently synchronous AIAgent loop.
+
+    SaaS/multi-tenant ready: all requests include tenant/user authentication
+    headers and validate tenant isolation on each session access.
+    """
 
     def __init__(
         self,
@@ -154,6 +158,8 @@ class RemoteStateStore:
         runtime_context: RuntimeContext | Mapping[str, Any],
         *,
         timeout: float = 10.0,
+        max_connections: int = 20,
+        max_keepalive_connections: int = 10,
     ):
         import httpx
 
@@ -163,7 +169,12 @@ class RemoteStateStore:
             if isinstance(runtime_context, RuntimeContext)
             else RuntimeContext.from_mapping(runtime_context)
         )
-        self._client = httpx.Client(timeout=timeout)
+        # Connection pooling for stateless gateway pods
+        limits = httpx.Limits(
+            max_connections=max_connections,
+            max_keepalive_connections=max_keepalive_connections,
+        )
+        self._client = httpx.Client(timeout=timeout, limits=limits)
         self.sessions = _RemoteSessionStore(self)
         self.config = _RemoteConfigStore(self)
         self.memory = _RemoteMemoryStore(self)
@@ -185,6 +196,46 @@ class RemoteStateStore:
         if ctx.state_token:
             headers["Authorization"] = f"Bearer {ctx.state_token}"
         return headers
+
+    def _auth_headers(self) -> dict[str, str]:
+        """Return only the authentication headers: tenant ID, user ID, and bearer token.
+
+        Used for requests where session-specific headers (X-Session-ID, X-Request-ID)
+        are not yet available or not needed.
+        """
+        ctx = self.runtime_context
+        headers = {
+            "X-Tenant-ID": ctx.tenant_id,
+            "X-User-ID": ctx.user_id or "",
+        }
+        if ctx.state_token:
+            headers["Authorization"] = f"Bearer {ctx.state_token}"
+        return headers
+
+    def _validate_tenant(self, session_id: str) -> None:
+        """Validate that the given session_id belongs to the current tenant.
+
+        Raises:
+            PermissionError: If cross-tenant access is detected.
+        """
+        import httpx
+
+        # Fetch session metadata to verify tenant ownership
+        try:
+            data = self._request("GET", f"/state/sessions/{session_id}/metadata")
+            session_tenant = data.get("tenant_id") if data else None
+            if session_tenant and session_tenant != self.runtime_context.tenant_id:
+                raise PermissionError(
+                    f"Cross-tenant access denied: session {session_id} "
+                    f"belongs to tenant {session_tenant}, "
+                    f"current tenant is {self.runtime_context.tenant_id}"
+                )
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 404:
+                # Session not found — let the API handle the 404, don't raise here
+                pass
+            else:
+                raise
 
     def _request(self, method: str, path: str, **kwargs: Any) -> Any:
         response = self._client.request(

@@ -8576,6 +8576,31 @@ class GatewayRunner:
 
             if agent is None:
                 # Config changed or first message — create fresh agent
+
+                # Extract tenant_id from Feishu event if available.
+                # Feishu events have tenant_key in event.header.tenant_key.
+                # For other platforms, defaults to "default" tenant.
+                tenant_id = "default"
+                raw_msg = getattr(event, "raw_message", None)
+                if raw_msg is not None:
+                    # Try Feishu-style nested event structure
+                    try:
+                        evt = getattr(raw_msg, "event", None) or raw_msg.get("event") if isinstance(raw_msg, dict) else None
+                        if evt is not None:
+                            header = getattr(evt, "header", None) or (evt.get("header") if isinstance(evt, dict) else None)
+                            if header is not None:
+                                tenant_id = str(getattr(header, "tenant_key", None) or (header.get("tenant_key") if isinstance(header, dict) else None) or "default")
+                    except Exception:
+                        pass  # Keep default tenant_id on any extraction error
+
+                # Build runtime_context for stateless SaaS gateway pods.
+                # This ensures all state service requests are tenant-scoped.
+                runtime_context = {
+                    "tenant_id": tenant_id,
+                    "user_id": source.user_id,
+                    "session_id": session_id,
+                }
+
                 agent = AIAgent(
                     model=turn_route["model"],
                     **turn_route["runtime"],
@@ -8599,6 +8624,7 @@ class GatewayRunner:
                     user_id=source.user_id,
                     session_db=self._session_db,
                     fallback_model=self._fallback_model,
+                    runtime_context=runtime_context,
                 )
                 if _cache_lock and _cache is not None:
                     with _cache_lock:

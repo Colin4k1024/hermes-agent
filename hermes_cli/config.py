@@ -2542,13 +2542,33 @@ def read_raw_config() -> Dict[str, Any]:
 
 
 def load_config() -> Dict[str, Any]:
-    """Load configuration from ~/.hermes/config.yaml."""
+    """Load configuration from remote State Service or local ~/.hermes/config.yaml.
+
+    In SaaS mode (HERMES_STATE_MODE=remote with HERMES_STATE_URL set), the config
+    is loaded from the remote State Service. Falls back to local config.yaml
+    for development mode or when the remote service is unavailable.
+    """
     import copy
+
+    # Check for SaaS remote config mode
+    state_mode = os.getenv("HERMES_STATE_MODE", "").lower()
+    state_url = os.getenv("HERMES_STATE_URL", "").strip() or os.getenv("HERMES_STATE_SERVICE_URL", "").strip()
+
+    if state_mode == "remote" and state_url:
+        # SaaS mode: try to load config from remote State Service
+        config = _load_remote_config(state_url)
+        if config is not None:
+            return _expand_env_vars(_normalize_root_model_keys(_normalize_max_turns_config(config)))
+
+        # Remote config failed; fall through to local fallback
+        print("Warning: Failed to load remote config, falling back to local config.yaml")
+
+    # Local development mode: load from ~/.hermes/config.yaml
     ensure_hermes_home()
     config_path = get_config_path()
-    
+
     config = copy.deepcopy(DEFAULT_CONFIG)
-    
+
     if config_path.exists():
         try:
             with open(config_path, encoding="utf-8") as f:
@@ -2564,8 +2584,38 @@ def load_config() -> Dict[str, Any]:
             config = _deep_merge(config, user_config)
         except Exception as e:
             print(f"Warning: Failed to load config: {e}")
-    
+
     return _expand_env_vars(_normalize_root_model_keys(_normalize_max_turns_config(config)))
+
+
+def _load_remote_config(state_url: str) -> Dict[str, Any] | None:
+    """Attempt to load config from the remote State Service.
+
+    Returns None if the remote service is unavailable or returns an error.
+    This is best-effort — callers should fall back to local config on failure.
+    """
+    import httpx
+
+    state_token = os.getenv("HERMES_STATE_SERVICE_TOKEN", "").strip()
+    headers = {
+        "X-Tenant-ID": os.getenv("HERMES_TENANT_ID", "default"),
+        "X-User-ID": os.getenv("HERMES_USER_ID", ""),
+    }
+    if state_token:
+        headers["Authorization"] = f"Bearer {state_token}"
+
+    try:
+        response = httpx.get(
+            f"{state_url.rstrip('/')}/state/config/effective",
+            headers=headers,
+            timeout=5.0,
+        )
+        response.raise_for_status()
+        data = response.json()
+        return data.get("config", data)
+    except Exception:
+        # Best-effort remote config; fall back to local
+        return None
 
 
 _SECURITY_COMMENT = """

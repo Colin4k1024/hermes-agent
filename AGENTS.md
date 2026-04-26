@@ -468,3 +468,38 @@ python -m pytest tests/tools/ -q                 # Tool-level tests
 ```
 
 Always run the full suite before pushing changes.
+
+
+<claude-mem-context>
+# Memory Context
+
+# [hermes-agent] recent context, 2026-04-25 8:42pm GMT+8
+
+Legend: 🎯session 🔴bugfix 🟣feature 🔄refactor ✅change 🔵discovery ⚖️decision
+Format: ID TIME TYPE TITLE
+Fetch details: get_observations([IDs]) | Search: mem-search skill
+
+Stats: 18 obs (3,654t read) | 750,800t work | 100% savings
+
+### Apr 25, 2026
+386 1:16p ⚖️ Project direction shift: SaaS化改造讨论启动
+387 1:17p 🔵 hermes-agent 微服务架构发现
+388 " 🔵 现有安全与审计机制
+389 1:18p 🔵 认证服务完整技术栈发现
+390 " 🔵 路由服务智能调度机制
+391 " 🔵 配额服务双层计数架构
+392 " 🔵 部署架构完整技术栈
+393 " ⚖️ SaaS化改造方向确定：单企业私有化+飞书优先
+394 " 🟣 飞书身份认证强化需求
+395 " 🔵 现有飞书集成能力盘点
+396 1:22p ⚖️ SaaS化改造项目启动
+397 1:23p 🔵 hermes-agent 架构深度分析
+398 " 🔵 AIAgent 初始化架构详解
+399 1:24p 🔵 发现已有 SaaS 架构：Pod 池化路由系统
+400 " 🔵 Skills Registry Service 和 Redis 路由实现
+401 " 🔵 SessionDB 会话存储接口详析
+402 1:25p 🟣 实现 StateStore 抽象层支持无状态运行时
+403 1:28p 🟣 实现 State Service 微服务
+
+Access 751k tokens of past work via get_observations([IDs]) or mem-search skill.
+</claude-mem-context>

@@ -6,6 +6,11 @@ Provides persistent session storage with FTS5 full-text search, replacing
 the per-session JSONL file approach. Stores session metadata, full message
 history, and model configuration for CLI and gateway sessions.
 
+IMPORTANT: This local SQLite-based state store is intended for
+development and local mode only. For production/SaaS deployments
+where the gateway runs as stateless pods, use RemoteStateStore
+instead, which stores all state in the remote State Service.
+
 Key design decisions:
 - WAL mode for concurrent readers + one writer (gateway multi-platform)
 - FTS5 virtual table for fast text search across all session messages

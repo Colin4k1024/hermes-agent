@@ -225,12 +225,26 @@ def get_external_skills_dirs() -> List[Path]:
 
 
 def get_all_skills_dirs() -> List[Path]:
-    """Return all skill directories: local ``~/.hermes/skills/`` first, then external.
+    """Return all skill directories.
 
-    The local dir is always first (and always included even if it doesn't exist
-    yet — callers handle that).  External dirs follow in config order.
+    Search order (first takes precedence):
+    1. Local ``~/.hermes/skills/`` (user customizations)
+    2. Shared ``/opt/hermes/skills/`` or HERMES_SHARED_SKILLS env var (read-only base)
+    3. External dirs from config.yaml
+
+    This order allows local customizations to override shared skills while
+    still providing a fallback to the shared directory.
     """
     dirs = [get_skills_dir()]
+
+    # Add shared read-only skills directory (SaaS mode: /opt/hermes/skills)
+    shared_skills_path = os.getenv("HERMES_SHARED_SKILLS", "/opt/hermes/skills").strip()
+    if shared_skills_path:
+        shared_dir = Path(shared_skills_path).resolve()
+        local_dir = get_skills_dir().resolve()
+        if shared_dir != local_dir and shared_dir.is_dir():
+            dirs.append(shared_dir)
+
     dirs.extend(get_external_skills_dirs())
     return dirs
 

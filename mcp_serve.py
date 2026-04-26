@@ -897,10 +897,20 @@ def run_sse_server(host: str = "localhost", port: int = 3000, verbose: bool = Fa
 
     import asyncio
 
+    import uvicorn
+
     async def _run():
+        # MCP 1.27+ changed run_sse_async to not accept host/port.
+        # Use uvicorn to serve the SSE Starlette app directly.
+        config = uvicorn.Config(
+            app=server.sse_app(),
+            host=host,
+            port=port,
+            log_level='debug' if verbose else 'warning',
+        )
+        srv = uvicorn.Server(config)
         try:
-            # run_sse_async starts an HTTP server with SSE endpoint
-            await server.run_sse_async(host=host, port=port)
+            await srv.serve()
         finally:
             bridge.stop()
 

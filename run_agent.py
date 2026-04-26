@@ -674,10 +674,22 @@ class AIAgent:
                 **self.runtime_context.__dict__,
                 "session_id": session_id,
             })
-        if state_store is None and os.getenv("HERMES_STATE_MODE", "").lower() == "remote":
-            state_url = os.getenv("HERMES_STATE_SERVICE_URL", "").strip()
+        if state_store is None:
+            # Determine effective mode: remote if HERMES_STATE_MODE=remote OR if HERMES_STATE_URL is set
+            state_mode = os.getenv("HERMES_STATE_MODE", "").lower()
+            # Support both HERMES_STATE_URL (preferred) and HERMES_STATE_SERVICE_URL for backward compat
+            state_url = os.getenv("HERMES_STATE_URL", "").strip() or os.getenv("HERMES_STATE_SERVICE_URL", "").strip()
             state_token = os.getenv("HERMES_STATE_SERVICE_TOKEN", "").strip()
-            if state_url:
+
+            # Default to remote mode when HERMES_STATE_URL is set (SaaS behavior)
+            is_remote_mode = state_mode == "remote" or (state_mode == "" and bool(state_url))
+            if is_remote_mode:
+                if not state_url:
+                    raise ValueError(
+                        "HERMES_STATE_MODE=remote requires HERMES_STATE_URL to be set. "
+                        "Set HERMES_STATE_URL to the State Service base URL "
+                        "(e.g., https://state-service:8080)."
+                    )
                 ctx_payload = {
                     **self.runtime_context.__dict__,
                     "state_token": self.runtime_context.state_token or state_token,

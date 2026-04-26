@@ -28,12 +28,11 @@ def build_plan_path(
     *,
     now: datetime | None = None,
 ) -> Path:
-    """Return the default workspace-relative markdown path for a /plan invocation.
+    """Return the default markdown path for a /plan invocation.
 
-    Relative paths are intentional: file tools are task/backend-aware and resolve
-    them against the active working directory for local, docker, ssh, modal,
-    daytona, and similar terminal backends. That keeps the plan with the active
-    workspace instead of the Hermes host's global home directory.
+    In SaaS mode (HERMES_STATE_MODE=remote), uses a system temp directory
+    to avoid writing to the ephemeral local filesystem.
+    In local/CLI mode, uses .hermes/plans/ relative to the workspace.
     """
     slug_source = (user_instruction or "").strip().splitlines()[0] if user_instruction else ""
     slug = _PLAN_SLUG_RE.sub("-", slug_source.lower()).strip("-")
@@ -41,7 +40,19 @@ def build_plan_path(
         slug = "-".join(part for part in slug.split("-")[:8] if part)[:48].strip("-")
     slug = slug or "conversation-plan"
     timestamp = (now or datetime.now()).strftime("%Y-%m-%d_%H%M%S")
-    return Path(".hermes") / "plans" / f"{timestamp}-{slug}.md"
+    filename = f"{timestamp}-{slug}.md"
+
+    # SaaS mode: use system temp dir to avoid local filesystem dependency
+    if os.getenv("HERMES_STATE_MODE", "").lower() == "remote":
+        import tempfile
+        return Path(tempfile.gettempdir()) / f"hermes-plans-{os.getenv('HERMES_TENANT_ID', 'default')}" / filename
+
+    # Local/CLI mode: use workspace-relative path
+    # Relative paths are intentional: file tools are task/backend-aware and resolve
+    # them against the active working directory for local, docker, ssh, modal,
+    # daytona, and similar terminal backends. That keeps the plan with the active
+    # workspace instead of the Hermes host's global home directory.
+    return Path(".hermes") / "plans" / filename
 
 
 def _load_skill_payload(skill_identifier: str, task_id: str | None = None) -> tuple[dict[str, Any], Path | None, str] | None:
