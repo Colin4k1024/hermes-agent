@@ -25,6 +25,7 @@ from state_service.schemas import (
     MessagesResponse,
     RequestContext,
     SessionCreateRequest,
+    SessionMetadataResponse,
     SessionPatchRequest,
     SessionResponse,
     SessionsListResponse,
@@ -69,6 +70,23 @@ def _session_to_response(session: Session) -> SessionResponse:
         source=session.source,
         model=session.model,
         model_config_data=session.model_config,
+        parent_session_id=session.parent_session_id,
+        title=session.title,
+        started_at=session.started_at,
+        ended_at=session.ended_at,
+        end_reason=session.end_reason,
+        message_count=session.message_count,
+        tool_call_count=session.tool_call_count,
+    )
+
+
+def _session_to_metadata_response(session: Session) -> SessionMetadataResponse:
+    return SessionMetadataResponse(
+        id=session.id,
+        tenant_id=session.tenant_id,
+        user_id=session.user_id,
+        source=session.source,
+        model=session.model,
         parent_session_id=session.parent_session_id,
         title=session.title,
         started_at=session.started_at,
@@ -284,6 +302,19 @@ async def get_session_by_id(
         raise HTTPException(status_code=404, detail="Session not found")
     await _audit(db, ctx, "read", "session", session_id, session_id=session_id)
     return _session_to_response(session)
+
+
+@app.get("/state/sessions/{session_id}/metadata", response_model=SessionMetadataResponse, tags=["Sessions"])
+async def get_session_metadata(
+    session_id: str,
+    ctx: RequestContext = Depends(get_request_context),
+    db: AsyncSession = Depends(db_dep),
+) -> SessionMetadataResponse:
+    session = await db.get(Session, session_id)
+    if session is None or session.user_id != ctx.user_id:
+        raise HTTPException(status_code=404, detail="Session not found")
+    await _audit(db, ctx, "read", "session_metadata", session_id, session_id=session_id)
+    return _session_to_metadata_response(session)
 
 
 @app.patch("/state/sessions/{session_id}", response_model=SessionResponse, tags=["Sessions"])

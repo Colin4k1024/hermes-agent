@@ -1,4 +1,5 @@
 import asyncio
+from pathlib import Path
 
 import pytest
 from alembic import command
@@ -21,15 +22,42 @@ from state_service.schemas import (
 )
 
 
+def test_state_service_requires_internal_api_key_outside_debug(monkeypatch):
+    from pydantic import ValidationError
+
+    from state_service.config import LOCAL_DEV_INTERNAL_API_KEY, Settings
+
+    monkeypatch.delenv("STATE_DEBUG", raising=False)
+    monkeypatch.delenv("STATE_INTERNAL_API_KEY", raising=False)
+    with pytest.raises(ValidationError, match="STATE_INTERNAL_API_KEY must be set"):
+        Settings(_env_file=None)
+
+    monkeypatch.setenv("STATE_INTERNAL_API_KEY", LOCAL_DEV_INTERNAL_API_KEY)
+    with pytest.raises(ValidationError, match="local development token"):
+        Settings(_env_file=None)
+
+
+def test_state_service_allows_default_internal_api_key_in_debug(monkeypatch):
+    from state_service.config import LOCAL_DEV_INTERNAL_API_KEY, Settings
+
+    monkeypatch.setenv("STATE_DEBUG", "true")
+    monkeypatch.delenv("STATE_INTERNAL_API_KEY", raising=False)
+
+    settings = Settings(_env_file=None)
+
+    assert settings.internal_api_key == LOCAL_DEV_INTERNAL_API_KEY
+
+
 def test_alembic_initial_migration_creates_schema(tmp_path, monkeypatch):
     import state_service.config as state_config
 
+    service_root = Path(__file__).resolve().parents[1]
     db_url = f"sqlite+aiosqlite:///{tmp_path / 'migration.db'}"
     monkeypatch.setenv("STATE_DATABASE_URL", db_url)
     state_config.settings.database_url = db_url
 
-    cfg = Config("services/state-service/alembic.ini")
-    cfg.set_main_option("script_location", "services/state-service/alembic")
+    cfg = Config(str(service_root / "alembic.ini"))
+    cfg.set_main_option("script_location", str(service_root / "alembic"))
 
     command.upgrade(cfg, "head")
     sync_engine = create_engine(f"sqlite:///{tmp_path / 'migration.db'}")

@@ -8,9 +8,13 @@ Tests cover:
 - API endpoints
 """
 
-import pytest
-from unittest.mock import patch, MagicMock, AsyncMock
+import asyncio
+import hashlib
+import importlib
 import time
+from unittest.mock import patch, MagicMock, AsyncMock
+
+import pytest
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -20,6 +24,7 @@ import time
 def mock_redis_pool():
     """Mock Redis for all tests."""
     mock = MagicMock()
+    importlib.import_module("router_service.redis_client")
     with patch("router_service.redis_client.get_redis_pool", return_value=mock):
         with patch("router_service.redis_client.get_redis", return_value=mock):
             yield mock
@@ -348,6 +353,61 @@ class TestSchemas:
         )
         assert req.hermes_home_path == "/nas/hermes-homes/00/user-user-123"
         assert req.env_vars["EXTRA_VAR"] == "value"
+
+
+# ---------------------------------------------------------------------------
+# Scheduler tests
+# ---------------------------------------------------------------------------
+
+class TestScheduler:
+    """Test router scheduling behavior."""
+
+    def test_stateless_runtime_hashes_home_path_subject_without_changing_route_key(
+        self, mock_settings
+    ):
+        """Stateless HERMES_HOME path uses hashed subject while routing stays raw."""
+        from router_service.schemas import InternalRouteRequest, QuotaCheckResponse
+        from router_service.scheduler import route_request
+
+        route_subject = "tenant-a/../../sessions/chat-123"
+        expected_component = hashlib.sha256(route_subject.encode()).hexdigest()
+        prepare_mock = AsyncMock(return_value=("pod-42", 12, 1))
+
+        req = InternalRouteRequest(
+            user_id="user-123",
+            message="Hello",
+            session_id=route_subject,
+        )
+
+        with (
+            patch(
+                "router_service.scheduler.check_quota",
+                AsyncMock(return_value=QuotaCheckResponse(allowed=True)),
+            ),
+            patch("router_service.scheduler._cold_start_pod", prepare_mock),
+            patch(
+                "router_service.scheduler.rc.acquire_session_lock",
+                return_value=(True, "pending"),
+            ) as lock_mock,
+            patch(
+                "router_service.scheduler.rc.get_route",
+                return_value=None,
+            ) as get_route_mock,
+            patch("router_service.scheduler.rc.set_route") as set_route_mock,
+            patch("router_service.scheduler.rc.set_pod_health"),
+            patch("router_service.scheduler.rc.release_session_lock") as release_mock,
+        ):
+            resp = asyncio.run(route_request(req))
+
+        assert resp.success is True
+        lock_mock.assert_called_once_with(route_subject)
+        get_route_mock.assert_called_once_with(route_subject)
+        set_route_mock.assert_called_once_with(route_subject, "pod-42")
+        release_mock.assert_called_once_with(route_subject)
+
+        _, hermes_home_path = prepare_mock.call_args.args[:2]
+        assert hermes_home_path == f"/tmp/hermes-runtime/{expected_component}"
+        assert route_subject not in hermes_home_path
 
 
 # ---------------------------------------------------------------------------

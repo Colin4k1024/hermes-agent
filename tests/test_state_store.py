@@ -105,3 +105,30 @@ def test_remote_state_store_sends_runtime_context_headers(monkeypatch):
         assert [req.url.path for req in seen] == ["/state/config/effective", "/state/sessions"]
     finally:
         store.close()
+
+
+def test_remote_state_store_validate_tenant_rejects_owner_mismatch(monkeypatch):
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/state/sessions/s-1/metadata"
+        return httpx.Response(200, json={"tenant_id": "other-corp"})
+
+    transport = httpx.MockTransport(handler)
+    real_client = httpx.Client
+
+    def client_factory(*args, **kwargs):
+        return real_client(transport=transport, timeout=kwargs.get("timeout"))
+
+    monkeypatch.setattr(httpx, "Client", client_factory)
+    store = RemoteStateStore(
+        "http://state-service",
+        RuntimeContext(tenant_id="corp", user_id="u-1", state_token="state-token"),
+    )
+    try:
+        try:
+            store._validate_tenant("s-1")
+        except PermissionError as exc:
+            assert "Cross-tenant access denied" in str(exc)
+        else:
+            raise AssertionError("Expected tenant mismatch to raise PermissionError")
+    finally:
+        store.close()

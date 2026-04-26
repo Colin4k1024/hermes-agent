@@ -43,7 +43,7 @@ def cross_tenant_store(state_service_url):
     """RemoteStateStore with a different tenant to test isolation."""
     return RemoteStateStore(
         state_service_url,
-        RuntimeContext(tenant_id="other-tenant")
+        RuntimeContext(tenant_id="other-tenant", user_id="test-user")
     )
 
 
@@ -146,7 +146,7 @@ class TestTenantIsolation:
         sid = f"test-{uuid.uuid4().hex[:8]}"
         store = RemoteStateStore(
             state_service_url,
-            RuntimeContext(tenant_id="test-tenant")
+            RuntimeContext(tenant_id="test-tenant", user_id="test-user")
         )
         store.sessions.create_session(sid, source="feishu")
 
@@ -158,7 +158,7 @@ class TestTenantIsolation:
         sid = f"test-{uuid.uuid4().hex[:8]}"
         store = RemoteStateStore(
             state_service_url,
-            RuntimeContext(tenant_id="test-tenant")
+            RuntimeContext(tenant_id="test-tenant", user_id="test-user")
         )
         store.sessions.create_session(sid, source="feishu")
 

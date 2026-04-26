@@ -62,6 +62,21 @@ class SessionResponse(BaseModel):
     tool_call_count: int = 0
 
 
+class SessionMetadataResponse(BaseModel):
+    id: str
+    tenant_id: str
+    user_id: str
+    source: str
+    model: str | None = None
+    parent_session_id: str | None = None
+    title: str | None = None
+    started_at: datetime
+    ended_at: datetime | None = None
+    end_reason: str | None = None
+    message_count: int = 0
+    tool_call_count: int = 0
+
+
 class MessageCreateRequest(BaseModel):
     role: str
     content: str | None = None

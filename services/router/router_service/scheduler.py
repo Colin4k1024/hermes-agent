@@ -116,6 +116,11 @@ def _get_sidecar_url(pod_id: str) -> str:
     return f"http://{pod_id}.default.svc.cluster.local:8643"
 
 
+def _stateless_home_component(route_subject: str) -> str:
+    """Return a deterministic filesystem-safe component for a route subject."""
+    return hashlib.sha256(route_subject.encode()).hexdigest()
+
+
 # ---------------------------------------------------------------------------
 # Cold start: select idle Pod and trigger prepare
 # ---------------------------------------------------------------------------
@@ -267,7 +272,8 @@ async def route_request(
                 runtime_context["state_token"] = settings.state_service_token
 
         if settings.stateless_runtime:
-            hermes_home_path = f"/tmp/hermes-runtime/{route_subject}"
+            subject_component = _stateless_home_component(route_subject)
+            hermes_home_path = f"/tmp/hermes-runtime/{subject_component}"
         else:
             # Get NAS shard from user_id for hermes_home_path construction.
             nas_shard = hashlib.sha256(user_id.encode()).hexdigest()[:2]

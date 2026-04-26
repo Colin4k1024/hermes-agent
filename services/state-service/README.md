@@ -18,7 +18,7 @@ Environment variables use the `STATE_` prefix.
 | `STATE_REDIS_URL` | `redis://localhost:6379/0` | Hot cache/session coordination backend |
 | `STATE_OBJECT_STORAGE_ENDPOINT` | unset | Object storage endpoint for large cache/blob payloads |
 | `STATE_OBJECT_STORAGE_BUCKET` | `hermes-state-cache` | Object storage bucket for cache/blob payloads |
-| `STATE_INTERNAL_API_KEY` | `dev-state-key-change-in-prod` | Bearer token required for internal API calls |
+| `STATE_INTERNAL_API_KEY` | unset (`dev-state-key-change-in-prod` only when `STATE_DEBUG=true`) | Bearer token required for internal API calls |
 | `STATE_DEFAULT_TENANT_ID` | `default` | Tenant fallback for single-enterprise deployments |
 
 ## Database Migration
