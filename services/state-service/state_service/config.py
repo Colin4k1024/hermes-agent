@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://hermes:hermes@localhost:5432/hermes_platform"
     db_pool_size: int = 10
     auto_create_schema: bool = False
-    expected_migration_revision: str = "20260425_0001"
+    expected_migration_revision: str = "20260426_0001"
 
     redis_url: str = "redis://localhost:6379/0"
     object_storage_endpoint: str | None = None
@@ -30,6 +30,10 @@ class Settings(BaseSettings):
 
     internal_api_key: str | None = None
     default_tenant_id: str = "default"
+
+    # Rate limiting (per-user, per-endpoint, sliding window backed by Redis)
+    rate_limit_messages_per_minute: int = 100
+    rate_limit_memory_writes_per_minute: int = 60
 
     @model_validator(mode="after")
     def require_production_internal_api_key(self) -> "Settings":

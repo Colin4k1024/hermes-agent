@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from typing import Callable
 
-from fastapi import Depends, FastAPI, HTTPException, Query
+import redis.asyncio as aioredis
+from fastapi import Depends, FastAPI, HTTPException, Query, status
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import and_, desc, func, not_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from state_service.config import settings
 from state_service.database import close_db, get_session, health_check, init_db, readiness_check
 from state_service.models import AuditEvent, CacheMetadata, MemoryRecord, Message, Session, UserConfig, now_utc
 from state_service.schemas import (
@@ -60,6 +63,63 @@ app.add_middleware(
 async def db_dep():
     async with get_session() as session:
         yield session
+
+
+# ---------------------------------------------------------------------------
+# Redis-backed rate limiting
+# ---------------------------------------------------------------------------
+
+_redis_client: aioredis.Redis | None = None
+
+
+async def _get_redis() -> aioredis.Redis | None:
+    """Lazy-init a shared Redis connection; returns None when unavailable."""
+    global _redis_client
+    if _redis_client is None:
+        try:
+            _redis_client = aioredis.from_url(
+                settings.redis_url,
+                decode_responses=True,
+                socket_connect_timeout=1,
+                socket_timeout=1,
+            )
+            # Verify connectivity on first use
+            await _redis_client.ping()
+        except Exception:
+            _redis_client = None
+            return None
+    return _redis_client
+
+
+def rate_limit(endpoint_key: str, requests_per_minute: int) -> Callable:
+    """Return a FastAPI dependency that enforces per-user fixed-window rate limiting.
+
+    Fails open when Redis is unavailable so that a Redis outage does not block
+    legitimate requests to this internal service.
+    """
+
+    async def _dependency(ctx: RequestContext = Depends(get_request_context)) -> None:
+        r = await _get_redis()
+        if r is None:
+            return  # Fail open: Redis not reachable
+        key = f"rl:{ctx.tenant_id}:{ctx.user_id}:{endpoint_key}"
+        try:
+            count = await r.incr(key)
+            if count == 1:
+                # Set TTL only on first increment to define the window
+                await r.expire(key, 60)
+            if count > requests_per_minute:
+                raise HTTPException(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    detail="Rate limit exceeded — please slow down.",
+                    headers={"Retry-After": "60"},
+                )
+        except HTTPException:
+            raise
+        except Exception:
+            pass  # Fail open on transient Redis errors
+
+    return _dependency
 
 
 def _session_to_response(session: Session) -> SessionResponse:
@@ -334,7 +394,11 @@ async def patch_session(
     return _session_to_response(session)
 
 
-@app.post("/state/sessions/{session_id}/messages", tags=["Sessions"])
+@app.post(
+    "/state/sessions/{session_id}/messages",
+    tags=["Sessions"],
+    dependencies=[Depends(rate_limit("messages", settings.rate_limit_messages_per_minute))],
+)
 async def append_message(
     session_id: str,
     req: MessageCreateRequest,
@@ -576,7 +640,12 @@ async def list_memory(
     ])
 
 
-@app.put("/state/memory/{namespace}/{key}", response_model=MemoryItem, tags=["Memory"])
+@app.put(
+    "/state/memory/{namespace}/{key}",
+    response_model=MemoryItem,
+    tags=["Memory"],
+    dependencies=[Depends(rate_limit("memory_write", settings.rate_limit_memory_writes_per_minute))],
+)
 async def upsert_memory(
     namespace: str,
     key: str,
