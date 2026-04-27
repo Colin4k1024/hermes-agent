@@ -1,0 +1,49 @@
+server:
+  address: ":8006"
+  shutdownTimeout: 30
+  swaggerPath: "/swagger"
+
+# Database (PostgreSQL)
+database:
+  default:
+    host: "localhost"
+    port: 5432
+    user: "hermes"
+    pass: "hermes"
+    name: "hermes_platform"
+    type: "pgsql"
+    charset: "utf8"
+    maxIdle: 10
+    maxOpen: 100
+    maxLifetime: "30s"
+    queryTimeout: "10s"
+    execTimeout: "10s"
+
+# Redis (for rate limiting)
+redis:
+  default:
+    host: "localhost"
+    port: 6379
+    db: 0
+    pass: ""
+    maxIdle: 50
+    maxOpen: 200
+
+# OSS (Alibaba Cloud Object Storage)
+oss:
+  endpoint: "https://oss-cn-hangzhou.aliyuncs.com"
+  accessKeyId: ""
+  accessKeySecret: ""
+  region: "cn-hangzhou"
+  bucketMessages: "hermes-messages"
+  bucketMemory: "hermes-memory"
+  bucketAudit: "hermes-audit"
+  strictMode: true
+  objectLockDays: 2555  # 7 years for WORM compliance
+
+# Application settings
+app:
+  host: "0.0.0.0"
+  port: 8006
+  rateLimitMessagesPerMinute: 100
+  rateLimitMemoryWritesPerMinute: 60
