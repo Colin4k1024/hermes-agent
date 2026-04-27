@@ -8,6 +8,7 @@ user/session state lives behind a service boundary.
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from dataclasses import dataclass, field
 from typing import Any, Mapping, Protocol
@@ -182,6 +183,7 @@ class RemoteStateStore:
         )
         self._client = httpx.Client(timeout=timeout, limits=limits)
         self._validated_sessions: dict[str, bool] = {}
+        self._validated_sessions_lock = threading.Lock()
         self._validated_sessions_max_size: int = 10000
         self.sessions = _RemoteSessionStore(self)
         self.config = _RemoteConfigStore(self)
@@ -232,11 +234,13 @@ class RemoteStateStore:
         Raises:
             PermissionError: If cross-tenant access is detected.
         """
+        # Fast path: check without lock (dict read is thread-safe in CPython for simple ops)
         if session_id in self._validated_sessions:
             return
 
         import httpx
 
+        # Perform HTTP validation OUTSIDE the lock — lock only protects cache write
         try:
             data = self._request("GET", f"/state/sessions/{session_id}/metadata")
             session_tenant = data.get("tenant_id") if data else None
@@ -246,6 +250,17 @@ class RemoteStateStore:
                     f"belongs to tenant {session_tenant}, "
                     f"current tenant is {self.runtime_context.tenant_id}"
                 )
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 404:
+                data = None
+            else:
+                raise
+
+        # Lock only protects the cache write — brief, no I/O
+        with self._validated_sessions_lock:
+            # Double-check after acquiring lock (another thread may have cached it)
+            if session_id in self._validated_sessions:
+                return
             # Evict oldest entry if at capacity
             if len(self._validated_sessions) >= self._validated_sessions_max_size:
                 # Remove oldest ~10%
@@ -253,11 +268,6 @@ class RemoteStateStore:
                 for k in keys_to_remove:
                     del self._validated_sessions[k]
             self._validated_sessions[session_id] = True
-        except httpx.HTTPStatusError as exc:
-            if exc.response.status_code == 404:
-                pass
-            else:
-                raise
 
     _MAX_RETRIES = 3
 

@@ -33,7 +33,7 @@ def get_redis_pool() -> redis.ConnectionPool:
     if _redis_pool is None:
         _redis_pool = redis.ConnectionPool.from_url(
             settings.redis_url,
-            max_connections=50,
+            max_connections=300,
             decode_responses=True,
             socket_timeout=2.0,
             socket_connect_timeout=2.0,

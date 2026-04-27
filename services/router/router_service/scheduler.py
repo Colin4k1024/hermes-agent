@@ -32,6 +32,34 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# Shared HTTP client (connection pooling for high concurrency)
+# ---------------------------------------------------------------------------
+
+_shared_http_client: httpx.AsyncClient | None = None
+
+
+async def _get_http_client() -> httpx.AsyncClient:
+    """Get or create the shared httpx AsyncClient with connection pooling."""
+    global _shared_http_client
+    if _shared_http_client is None:
+        _shared_http_client = httpx.AsyncClient(
+            timeout=httpx.Timeout(30.0),
+            limits=httpx.Limits(
+                max_connections=200,
+                max_keepalive_connections=50,
+            ),
+        )
+    return _shared_http_client
+
+
+async def _close_http_client() -> None:
+    """Close the shared HTTP client on shutdown."""
+    global _shared_http_client
+    if _shared_http_client is not None:
+        await _shared_http_client.aclose()
+        _shared_http_client = None
+
 
 # ---------------------------------------------------------------------------
 # Sidecar release helper
@@ -55,13 +83,13 @@ async def call_sidecar_release(pod_id: str, pod_host: str | None = None) -> bool
         pod_host = f"http://{pod_id}:8643"
 
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.post(
-                f"{pod_host}/internal/release",
-                headers={"X-Pod-ID": pod_id},
-                json={"pod_id": pod_id, "reason": "idle_recycle"},
-            )
-            return resp.status_code == 200
+        client = await _get_http_client()
+        resp = await client.post(
+            f"{pod_host}/internal/release",
+            headers={"X-Pod-ID": pod_id},
+            json={"pod_id": pod_id, "reason": "idle_recycle"},
+        )
+        return resp.status_code == 200
     except (httpx.RequestError, httpx.TimeoutException):
         return False
 
@@ -73,26 +101,26 @@ async def call_sidecar_release(pod_id: str, pod_host: str | None = None) -> bool
 async def check_quota(user_id: str, estimated_tokens: int = 0) -> QuotaCheckResponse:
     """Call Quota Service to verify user has remaining quota."""
     try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            resp = await client.post(
-                f"{settings.quota_service_url}{settings.quota_check_endpoint}",
-                json=QuotaCheckRequest(
-                    user_id=user_id,
-                    estimated_tokens=estimated_tokens,
-                ).model_dump(),
-            )
-            if resp.status_code == 200:
-                return QuotaCheckResponse(**resp.json())
-            logger.warning(
-                "Quota check failed for %s: %s %s",
-                user_id, resp.status_code, resp.text,
-            )
-            # On Quota Service error, fail open with warning
-            return QuotaCheckResponse(
-                allowed=True,
-                remaining_tokens=0,
-                message="quota_service_unavailable",
-            )
+        client = await _get_http_client()
+        resp = await client.post(
+            f"{settings.quota_service_url}{settings.quota_check_endpoint}",
+            json=QuotaCheckRequest(
+                user_id=user_id,
+                estimated_tokens=estimated_tokens,
+            ).model_dump(),
+        )
+        if resp.status_code == 200:
+            return QuotaCheckResponse(**resp.json())
+        logger.warning(
+            "Quota check failed for %s: %s %s",
+            user_id, resp.status_code, resp.text,
+        )
+        # On Quota Service error, fail open with warning
+        return QuotaCheckResponse(
+            allowed=True,
+            remaining_tokens=0,
+            message="quota_service_unavailable",
+        )
     except httpx.TimeoutException:
         logger.warning("Quota service timeout for %s, allowing request", user_id)
         return QuotaCheckResponse(allowed=True, remaining_tokens=0)
@@ -149,37 +177,38 @@ async def _cold_start_pod(
     retry_interval = settings.prepare_retry_interval
     max_retries = settings.prepare_max_retries
 
-    async with httpx.AsyncClient(timeout=settings.prepare_timeout) as client:
-        for attempt in range(max_retries):
-            try:
-                resp = await client.post(
-                    f"{_get_sidecar_url(pod_id)}/internal/prepare",
-                    json=InternalPrepareRequest(
-                        user_id=user_id,
-                        hermes_home_path=hermes_home_path,
-                        runtime_context=runtime_context,
-                        stateless=stateless,
-                        env_vars={
-                            "HERMES_STATE_MODE": "remote",
-                            "HERMES_STATE_SERVICE_URL": settings.state_service_url,
-                            "HERMES_STATE_SERVICE_TOKEN": settings.state_service_token,
-                        } if stateless else None,
-                    ).model_dump(),
-                )
-                if resp.status_code == 200:
-                    data = resp.json()
-                    if data.get("ready"):
-                        elapsed_ms = int((time.monotonic() - start) * 1000)
-                        rc.set_pod_health(pod_id)
-                        return pod_id, elapsed_ms, attempt + 1
-            except httpx.RequestError as exc:
-                logger.debug(
-                    "Prepare attempt %d failed for pod %s: %s",
-                    attempt + 1, pod_id, exc,
-                )
+    client = await _get_http_client()
+    for attempt in range(max_retries):
+        try:
+            resp = await client.post(
+                f"{_get_sidecar_url(pod_id)}/internal/prepare",
+                timeout=settings.prepare_timeout,
+                json=InternalPrepareRequest(
+                    user_id=user_id,
+                    hermes_home_path=hermes_home_path,
+                    runtime_context=runtime_context,
+                    stateless=stateless,
+                    env_vars={
+                        "HERMES_STATE_MODE": "remote",
+                        "HERMES_STATE_SERVICE_URL": settings.state_service_url,
+                        "HERMES_STATE_SERVICE_TOKEN": settings.state_service_token,
+                    } if stateless else None,
+                ).model_dump(),
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                if data.get("ready"):
+                    elapsed_ms = int((time.monotonic() - start) * 1000)
+                    rc.set_pod_health(pod_id)
+                    return pod_id, elapsed_ms, attempt + 1
+        except httpx.RequestError as exc:
+            logger.debug(
+                "Prepare attempt %d failed for pod %s: %s",
+                attempt + 1, pod_id, exc,
+            )
 
-            if attempt < max_retries - 1:
-                await asyncio.sleep(retry_interval)
+        if attempt < max_retries - 1:
+            await asyncio.sleep(retry_interval)
 
     elapsed_ms = int((time.monotonic() - start) * 1000)
     # If prepare failed, return pod to idle pool

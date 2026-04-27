@@ -37,7 +37,7 @@ class Settings(BaseSettings):
     # treating the pod as a long-lived user home.
     stateless_runtime: bool = True
     # Session lock TTL (seconds) — prevents concurrent routing for same user
-    session_lock_ttl: int = 30
+    session_lock_ttl: int = 120
     # Pod health TTL (seconds)
     pod_health_ttl: int = 60
     # Response stream TTL (seconds) — for Feishu callback

@@ -62,6 +62,7 @@ async def lifespan(app: FastAPI):
     idle_task.cancel()
     skill_task.cancel()
     rc.close_pool()
+    await scheduler._close_http_client()
     logger.info("Agent Router shutdown complete")
 
 

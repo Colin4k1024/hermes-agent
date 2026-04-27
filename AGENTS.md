@@ -473,50 +473,75 @@ Always run the full suite before pushing changes.
 <claude-mem-context>
 # Memory Context
 
-# [hermes-agent] recent context, 2026-04-27 1:29pm GMT+8
+# [hermes-agent] recent context, 2026-04-27 2:39pm GMT+8
 
 Legend: 🎯session 🔴bugfix 🟣feature 🔄refactor ✅change 🔵discovery ⚖️decision 🚨security_alert 🔐security_note
 Format: ID TIME TYPE TITLE
 Fetch details: get_observations([IDs]) | Search: mem-search skill
 
-Stats: 31 obs (10,411t read) | 548,681t work | 98% savings
+Stats: 50 obs (14,845t read) | 594,778t work | 98% savings
 
-### Apr 24, 2026
-921 3:54p 🔵 Hermes Agent Project Structure and Architecture
-922 4:04p ✅ CLAUDE.md created for hermes-agent project
-923 4:25p 🔵 Hermes Agent codebase architecture and development conventions
 ### Apr 27, 2026
-926 8:25a ✅ hermes-agent dev branch checked out and up-to-date
-927 " 🔵 hermes-agent dev branch contains extensive SaaS and enterprise features vs main
-S131 dev 分支最新更新总结 — Summarized all changes on dev branch after switching from main (Apr 27 at 8:25 AM)
-S129 切换到 dev 分支然后拉取最新的程序 — Switch hermes-agent repo to dev branch and pull latest code (Apr 27 at 8:25 AM)
-929 8:28a ✅ Switch to dev branch and pull latest code
-930 8:30a ✅ Switch to dev branch and pull latest code
-931 8:33a 🔵 Hermes Agent SaaS State Service — 35+ Security & Data Integrity Findings
-932 " 🔵 Hermes Agent SaaS Architecture — StateStore, RuntimeContext, Router Service Design
-933 " 🔵 Hermes Agent SaaS — Phase Implementation Roadmap (NEXT-STEPS.md)
-934 8:39a 🔵 Hermes-agent SaaS audit: RemoteStateStore._request has zero retry logic
-935 " 🚨 Router service: CORS wildcard + credentials, hardcoded namespace, timing-oracle API key check
-936 " 🚨 K8s secrets contain literal REPLACE_WITH_* placeholder strings — all internal auth passes with wrong key
-937 " 🔵 Hermes-agent K8s: HPA scale-down hard-kills active agent sessions, state-service under-replicated
-938 8:40a 🔵 ROUTER_INTERNAL_API_KEY never injected anywhere in K8s manifests — confirmed absent
-939 " 🔵 Hardcoded .default.svc namespace appears in 5 locations across router service including config baseline and tests
-940 " 🔵 _validate_tenant called 5 times per agent turn — one full HTTP GET round-trip per write method
-941 8:47a ⚖️ Hermes Agent SaaS 无状态化改造 — 45 问题全量修复计划确认
-942 8:52a ⚖️ P0 Fix Task Board: C-2 _validate_tenant 缓存任务创建
-943 " ⚖️ P0 Fix Task Board: C-3 Pod URL 命名空间硬编码修复任务创建
-944 8:53a 🚨 P0 Fix Task Board: C-4 Router 硬编码默认凭据防护
-945 " 🚨 P0 Fix Task Board: C-5 K8s Secret stringData 占位符清理
-946 8:57a 🟣 RemoteStateStore._request retry logic implemented (C-1)
-949 9:39a ✅ Git branch switched to dev and pulled latest code
-950 9:45a 🔵 state-service config has production API key guard; router-service does not
-951 9:56a ✅ Switch to dev branch and pull latest code
-952 10:07a 🟣 Router service now enforces production credential guard at startup
-S146 切换到 dev 分支并拉取最新代码 — 然后继续 hermes-agent SaaS 安全审计修复工作 (Apr 27 at 10:56 AM)
-956 11:30a 🔵 Audit logging infrastructure exists in auth-service
-957 " 🔵 Audit log uses timezone-aware timestamps with UTC
+S149 K8s Secret Files Removed from Git Repository (Apr 27 at 10:56 AM)
+957 11:30a 🔵 Audit log uses timezone-aware timestamps with UTC
 958 1:11p ✅ Hermes-agent Phase 2 continuation — P0 fix set scope confirmed via git diff
 963 1:27p 🟣 Hermes Agent SaaS化改造 PPT 方案请求
+964 1:29p 🟣 Hermes Agent SaaS 化改造 PPT 方案请求
+965 1:33p ⚖️ Hermes Agent SaaS 化改造 PPT 架构评审方案请求
+968 1:50p 🟣 Hermes Agent SaaS Architecture Review PPT Phase 2 Continuing
+969 1:51p 🚨 Router Service Credential Validation Hardening
+970 " 🚨 K8s Secret Files Removed from Git Repository
+971 " 🟣 RemoteStateStore Retry Logic with Jittered Backoff
+S150 Phase 2 audit changes: 12 files, +178/−120 lines across router service, K8s, and agent (Apr 27 at 1:51 PM)
+972 1:53p 🔵 Phase 2 audit residual inventory: only 2 minor TODOs remain
+973 " 🔵 CORS misconfiguration discovered across 4 services in SaaS audit
+974 1:54p 🚨 Router service CORS with allow_credentials=True — critical misconfiguration
+975 " 🚨 Quota check fails OPEN — unauthenticated access when quota service is down
+976 " 🔵 Router K8s deployment lacks Horizontal Pod Autoscaler — fixed 3-replica static deployment
+977 1:55p 🔴 Router service CORS hardened — open wildcard replaced with explicit origin allowlist
+978 " 🔴 Router config.py gains cors_origins field — completes CORS hardening
+979 1:56p 🚨 Router API key comparisons use timing-unsafe string inequality — needs hmac.compare_digest
+980 " 🔴 Router admin endpoints now use timing-safe API key comparison
+981 " 🔴 Router K8s deployment gains graceful shutdown — 15s preStop drain + 60s terminationGracePeriodSeconds
+982 1:57p ✅ Phase 2 audit changes: 12 files, +178/−120 lines across router service, K8s, and agent
+S154 Feishu-bot CORS hardened — credentials disabled, explicit methods/headers (Apr 27 at 1:57 PM)
+983 " 🔴 Phase 2 extended to quota-service and skills-registry — CORS wildcard hardcoded in both
+984 1:58p 🔵 Quota-service and skills-registry share same security gaps as router pre-fix
+986 " 🔴 Quota-service admin endpoints hardened with timing-safe API key comparison
+987 " 🔴 Skills-registry and quota-service now use timing-safe admin key comparison
+988 1:59p 🔴 Phase 2 CORS and timing-safe auth hardened across all 3 internal services
+989 " 🔴 Feishu-bot CORS hardened — credentials disabled, explicit methods/headers
+S156 Phase 2 SaaS security audit and fixes for hermes-agent — completing CORS, timing-safe auth, K8s hardening across all services (Apr 27 at 1:59 PM)
+S166 HIGH-1 bounded dict fix verified: state_store imports cleanly (Apr 27 at 2:00 PM)
+991 2:13p 🔵 Phase 2 code review: 2 CRITICAL, 3 HIGH findings — blocking merge
+992 " 🔴 CRITICAL-1 partially addressed: STATE_SERVICE_TOKEN added to env.example
+993 2:14p 🔴 CRITICAL-1 fixed: ROUTER_STATE_SERVICE_TOKEN now reads correct secret key
+994 2:15p 🔴 CRITICAL-2 and HIGH-1 fixed in state_store.py
+996 " 🔴 HIGH-2: quota-service now validates credentials at startup
+997 " 🔴 HIGH-2 and HIGH-3 resolved across all services
+998 " 🔴 MEDIUM-3 fixed and all review fixes verified syntactically
+999 " 🔵 HIGH-1 fix requires cachetools dependency — not installed in environment
+1000 2:16p 🔄 HIGH-1 revised: bounded cache now uses stdlib dict only
+1001 2:18p 🔵 HIGH-1 bounded dict fix verified: state_store imports cleanly
+S168 Phase 2 code review of hermes-agent — fix 2 CRITICAL and 3 HIGH findings from automated review (Apr 27 at 2:18 PM)
+S171 Hermes-agent Phase 2 SaaS security fixes staged for commit (Apr 27 at 2:19 PM)
+1003 2:23p ✅ Hermes-agent Phase 2 SaaS security fixes staged for commit
+S172 Commit Phase 2 SaaS security fixes to hermes-agent dev branch (Apr 27 at 2:23 PM)
+S174 CLAUDE.md project documentation added to hermes-agent (Apr 27 at 2:23 PM)
+1004 " ✅ CLAUDE.md project documentation added to hermes-agent
+S176 Commit all Phase 2 fixes to hermes-agent dev branch (Apr 27 at 2:23 PM)
+1005 2:28p 🟣 Hermes-agent Concurrency Testing Planned
+1006 2:29p 🔵 Hermes-agent Microservices Architecture Identified
+1008 " 🔵 Hermes SaaS Router Uses Redis for Session Locking and Pod Pool
+1009 " 🔵 Redis Lua Scripts Provide Atomic Session Locking for Concurrent Access Control
+1010 2:30p 🔵 AIAgent Uses Threading Lock and ThreadPoolExecutor for Concurrent Tool Execution
+1011 " 🔵 Hermes Gateway Session Management Architecture
+1012 2:31p 🔵 Router Has Unit Tests for Session Lock Atomicity
+1013 " 🔵 Router Configuration Architecture and Redis Key Schema
+1014 2:32p 🔵 Concurrency Analysis Identified 2 HIGH and 4 MEDIUM Risk Issues
+1015 " ✅ Hermes Concurrency Test Plan Created
+1016 2:37p 🟣 Concurrency Test Suite Created for Hermes Agent
+1017 " 🔵 Concurrency Tests Run: 3 Pass, 7 Fail Due to Mock Setup Issues
 
-Access 549k tokens of past work via get_observations([IDs]) or mem-search skill.
+Access 595k tokens of past work via get_observations([IDs]) or mem-search skill.
 </claude-mem-context>

@@ -39,7 +39,7 @@ def mock_settings():
         redis_port=6379,
         redis_db=0,
         route_ttl=1800,
-        session_lock_ttl=30,
+        session_lock_ttl=120,
         pod_health_ttl=60,
         internal_api_key="test-key",
     )
@@ -73,7 +73,7 @@ class TestSessionLock:
         assert holder == "pod-1"
         script.assert_called_once_with(
             keys=[session_lock_key("user-1")],
-            args=["pod-1", 30],
+            args=["pod-1", 120],
         )
 
     def test_acquire_lock_already_held(self, mock_redis_pool):
@@ -466,8 +466,8 @@ class TestSettings:
         assert s.route_ttl == 1800
 
     def test_session_lock_ttl(self):
-        """Session lock TTL is 30s per BE-1."""
+        """Session lock TTL is 120s for long-running requests."""
         from router_service.config import Settings
 
         s = Settings()
-        assert s.session_lock_ttl == 30
+        assert s.session_lock_ttl == 120
