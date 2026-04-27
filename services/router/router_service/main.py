@@ -6,6 +6,7 @@ Routes user requests to Agent Pods via Redis routing table.
 
 import asyncio
 import logging
+import secrets
 import time
 from contextlib import asynccontextmanager
 
@@ -23,7 +24,7 @@ from .schemas import (
     ErrorResponse,
     ChatCompletionsRequest,
 )
-from .scheduler import route_request, get_pool_health
+from .scheduler import route_request, get_pool_health, _get_pod_url
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -104,13 +105,17 @@ app = FastAPI(
     redoc_url="/redoc",
 )
 
-# CORS
+# CORS — restrict to known origins in production; credentials require explicit origins
+_cors_origins = (
+    settings.cors_origins if hasattr(settings, "cors_origins") and settings.cors_origins
+    else ([] if not settings.debug else ["http://localhost:3000"])
+)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=_cors_origins,
+    allow_credentials=bool(_cors_origins),  # Only allow credentials when origins are explicitly set
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-User-ID", "X-Tenant-ID", "X-Session-ID", "X-Request-ID"],
 )
 
 # ---------------------------------------------------------------------------
@@ -290,7 +295,7 @@ async def chat_completions(
             raise HTTPException(status_code=503, detail=route_resp.message)
         pod_id = route_resp.pod_id
 
-    pod_url = f"http://{pod_id}.default.svc.cluster.local:8642"
+    pod_url = _get_pod_url(pod_id)
 
     # Read raw request body for passthrough
     body = await request.body()
@@ -392,7 +397,7 @@ async def list_models() -> JSONResponse:
     active_pods = rc.get_all_active_pods()
     if active_pods:
         pod_id = next(iter(active_pods))
-        pod_url = f"http://{pod_id}.default.svc.cluster.local:8642"
+        pod_url = _get_pod_url(pod_id)
         try:
             async with httpx.AsyncClient(timeout=5.0) as client:
                 resp = await client.get(f"{pod_url}/v1/models")
@@ -434,7 +439,7 @@ async def register_idle_pod(
 
     Requires internal API key.
     """
-    if x_api_key != settings.internal_api_key:
+    if not secrets.compare_digest(x_api_key, settings.internal_api_key):
         raise HTTPException(status_code=401, detail="Invalid API key")
 
     rc.add_pod_to_idle(pod_id)
@@ -453,7 +458,7 @@ async def delete_user_route(
     x_api_key: str = Header(..., alias="X-Api-Key"),
 ) -> dict:
     """Force-delete a user's route and release their pod (admin only)."""
-    if x_api_key != settings.internal_api_key:
+    if not secrets.compare_digest(x_api_key, settings.internal_api_key):
         raise HTTPException(status_code=401, detail="Invalid API key")
 
     pod_id = rc.delete_route(user_id)
@@ -473,7 +478,7 @@ async def debug_routes(
     x_api_key: str = Header(..., alias="X-Api-Key"),
 ) -> dict:
     """List all active routes and idle pods (debug endpoint)."""
-    if x_api_key != settings.internal_api_key:
+    if not secrets.compare_digest(x_api_key, settings.internal_api_key):
         raise HTTPException(status_code=401, detail="Invalid API key")
 
     active_pods = rc.get_all_active_pods()

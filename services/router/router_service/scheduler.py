@@ -107,13 +107,14 @@ async def check_quota(user_id: str, estimated_tokens: int = 0) -> QuotaCheckResp
 
 def _get_pod_url(pod_id: str) -> str:
     """Build the HTTP URL for an Agent Pod's main service (port 8642)."""
-    # In K8s: http://<pod-name>.<namespace>.svc.cluster.local:8642
-    return f"http://{pod_id}.default.svc.cluster.local:8642"
+    ns = settings.pod_namespace
+    return f"http://{pod_id}.{ns}.svc.cluster.local:8642"
 
 
 def _get_sidecar_url(pod_id: str) -> str:
     """Build the HTTP URL for a Pod's Sidecar (port 8643)."""
-    return f"http://{pod_id}.default.svc.cluster.local:8643"
+    ns = settings.pod_namespace
+    return f"http://{pod_id}.{ns}.svc.cluster.local:8643"
 
 
 def _stateless_home_component(route_subject: str) -> str:

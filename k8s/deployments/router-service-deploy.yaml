@@ -59,7 +59,18 @@ spec:
               valueFrom:
                 secretKeyRef:
                   name: hermes-agent-secret
+                  key: STATE_SERVICE_TOKEN
+            - name: ROUTER_INTERNAL_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: hermes-agent-secret
                   key: INTERNAL_API_KEY
+          # Graceful shutdown: wait for traffic drain before SIGTERM
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/sh", "-c", "sleep 15 && curl -s -X POST http://localhost:8002/internal/health > /dev/null || true"]
+          terminationGracePeriodSeconds: 60
           readinessProbe:
             httpGet:
               path: /internal/health

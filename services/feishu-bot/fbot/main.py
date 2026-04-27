@@ -113,12 +113,15 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# CORS — Feishu bot receives webhooks from Feishu servers (preflight from various origins)
+# Restrict credentials in production; ingress controller handles access control
+_cors_origins = settings.cors_origins if hasattr(settings, "cors_origins") and settings.cors_origins else ([] if not settings.debug else ["*"])
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],   # K8s ingress controls external access
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=_cors_origins,
+    allow_credentials=False,  # Credentials require explicit origins; disable for webhook receiver
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Feishu-Event", "X-Feishu-Signature"],
 )
 
 

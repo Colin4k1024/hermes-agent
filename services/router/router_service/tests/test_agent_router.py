@@ -319,7 +319,7 @@ class TestSchemas:
         resp = InternalRouteResponse(
             success=True,
             pod_id="pod-42",
-            pod_url="http://pod-42.default.svc.cluster.local:8642",
+            pod_url="http://pod-42.hermes-platform.svc.cluster.local:8642",
             source=RouteSource.HOT,
             quota_allowed=True,
         )

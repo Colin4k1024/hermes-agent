@@ -7,8 +7,14 @@ user/session state lives behind a service boundary.
 
 from __future__ import annotations
 
+import logging
+import time
 from dataclasses import dataclass, field
 from typing import Any, Mapping, Protocol
+
+from agent.retry_utils import jittered_backoff
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -175,6 +181,8 @@ class RemoteStateStore:
             max_keepalive_connections=max_keepalive_connections,
         )
         self._client = httpx.Client(timeout=timeout, limits=limits)
+        self._validated_sessions: dict[str, bool] = {}
+        self._validated_sessions_max_size: int = 10000
         self.sessions = _RemoteSessionStore(self)
         self.config = _RemoteConfigStore(self)
         self.memory = _RemoteMemoryStore(self)
@@ -219,12 +227,16 @@ class RemoteStateStore:
     def _validate_tenant(self, session_id: str) -> None:
         """Validate that the given session_id belongs to the current tenant.
 
+        Results are cached per session_id for the lifetime of this store instance.
+
         Raises:
             PermissionError: If cross-tenant access is detected.
         """
+        if session_id in self._validated_sessions:
+            return
+
         import httpx
 
-        # Fetch session metadata to verify tenant ownership
         try:
             data = self._request("GET", f"/state/sessions/{session_id}/metadata")
             session_tenant = data.get("tenant_id") if data else None
@@ -234,24 +246,71 @@ class RemoteStateStore:
                     f"belongs to tenant {session_tenant}, "
                     f"current tenant is {self.runtime_context.tenant_id}"
                 )
+            # Evict oldest entry if at capacity
+            if len(self._validated_sessions) >= self._validated_sessions_max_size:
+                # Remove oldest ~10%
+                keys_to_remove = list(self._validated_sessions.keys())[:max(1, self._validated_sessions_max_size // 10)]
+                for k in keys_to_remove:
+                    del self._validated_sessions[k]
+            self._validated_sessions[session_id] = True
         except httpx.HTTPStatusError as exc:
             if exc.response.status_code == 404:
-                # Session not found — let the API handle the 404, don't raise here
                 pass
             else:
                 raise
 
+    _MAX_RETRIES = 3
+
     def _request(self, method: str, path: str, **kwargs: Any) -> Any:
-        response = self._client.request(
-            method,
-            f"{self.base_url}{path}",
-            headers={**self._headers(), **kwargs.pop("headers", {})},
-            **kwargs,
-        )
-        response.raise_for_status()
-        if response.content:
-            return response.json()
-        return None
+        import httpx
+
+        merged_headers = {**self._headers(), **kwargs.pop("headers", {})}
+        last_exc: Exception | None = None
+        last_response: httpx.Response | None = None
+
+        for attempt in range(1, self._MAX_RETRIES + 1):
+            try:
+                response = self._client.request(
+                    method,
+                    f"{self.base_url}{path}",
+                    headers=merged_headers,
+                    **kwargs,
+                )
+                last_response = response
+                # Retry on 5xx errors (except on last attempt)
+                if response.status_code >= 500 and attempt < self._MAX_RETRIES:
+                    delay = jittered_backoff(attempt, base_delay=0.5, max_delay=5.0)
+                    logger.warning(
+                        "state-service %s %s returned %s, retrying in %.1fs (attempt %d/%d)",
+                        method, path, response.status_code, delay, attempt, self._MAX_RETRIES,
+                    )
+                    time.sleep(delay)
+                    continue
+                # Always raise for 4xx/5xx status codes
+                response.raise_for_status()
+                if response.content:
+                    return response.json()
+                return None
+            except (httpx.TransportError, httpx.TimeoutException) as exc:
+                last_exc = exc
+                if attempt < self._MAX_RETRIES:
+                    delay = jittered_backoff(attempt, base_delay=0.5, max_delay=5.0)
+                    logger.warning(
+                        "state-service %s %s network error: %s, retrying in %.1fs (attempt %d/%d)",
+                        method, path, exc, delay, attempt, self._MAX_RETRIES,
+                    )
+                    time.sleep(delay)
+                    continue
+                raise
+            except httpx.HTTPStatusError:
+                raise
+
+        # All retries exhausted — raise last exception or last response error
+        if last_exc is not None:
+            raise last_exc
+        if last_response is not None:
+            last_response.raise_for_status()
+        raise RuntimeError(f"state-service {method} {path} failed after {self._MAX_RETRIES} retries")
 
 
 class _RemoteConfigStore:

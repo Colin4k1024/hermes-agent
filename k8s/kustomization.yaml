@@ -16,9 +16,7 @@ resources:
   - configmaps/skills-registry-cm.yaml
   - configmaps/litellm-cm.yaml
   - configmaps/admin-console-cm.yaml
-  # Secrets (注：生产环境应使用 SealedSecrets 或外部 secret 管理)
-  - secrets/auth-secret.yaml
-  - secrets/hermes-agent-secret.yaml
+  # Secrets are generated from .env files — see k8s/secrets/README.md
   # Services
   - services/auth-service-svc.yaml
   - services/router-service-svc.yaml
@@ -48,6 +46,17 @@ resources:
 commonLabels:
   app: hermes
   environment: production
+secretGenerator:
+  - name: hermes-agent-secret
+    envs:
+      - secrets/hermes-agent-secret.env
+    type: Opaque
+  - name: auth-secret
+    envs:
+      - secrets/auth-secret.env
+    type: Opaque
+generatorOptions:
+  disableNameSuffixHash: true
 images:
   # TODO: Replace with actual image URLs
   # - name: hermes-auth-service

@@ -6,6 +6,7 @@ __pycache__/
 .vscode/
 .env
 .env.local
+k8s/secrets/*.env
 .env.development.local
 .env.test.local
 .env.production.local

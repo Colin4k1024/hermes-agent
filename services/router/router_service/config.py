@@ -1,6 +1,13 @@
 """Configuration for Agent Router Service."""
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_DEV_PLACEHOLDERS = frozenset({
+    "dev-state-key-change-in-prod",
+    "dev-internal-key-change-in-prod",
+    "",
+})
 
 
 class Settings(BaseSettings):
@@ -48,7 +55,8 @@ class Settings(BaseSettings):
     key_skill_update: str = "channel:skill-update"  # PUBSUB
 
     # Agent Pod defaults
-    agent_pod_base_url: str = "http://agent-pod.default.svc.cluster.local:8642"
+    pod_namespace: str = "hermes-platform"
+    agent_pod_base_url: str = "http://agent-pod.hermes-platform.svc.cluster.local:8642"
     sidecar_base_url_suffix: str = ":8643"  # append to pod name for sidecar port
     prepare_timeout: int = 5  # seconds to wait for Pod /internal/prepare
     prepare_retry_interval: float = 0.5  # seconds between retries
@@ -60,7 +68,7 @@ class Settings(BaseSettings):
 
     # State Service (remote user/session/config/memory/cache state)
     state_service_url: str = "http://state-service.hermes-control.svc.cluster.local:8006"
-    state_service_token: str = "dev-state-key-change-in-prod"
+    state_service_token: str = ""
 
     # Quota Service
     quota_service_url: str = "http://quota-service.hermes-control.svc.cluster.local:8003"
@@ -78,7 +86,32 @@ class Settings(BaseSettings):
     health_check_timeout: int = 3  # seconds to ping a Pod
 
     # Auth (shared secret for internal calls)
-    internal_api_key: str = "dev-internal-key-change-in-prod"
+    internal_api_key: str = ""
+
+    # CORS allowed origins (comma-separated in env var ROUTER_CORS_ORIGINS)
+    cors_origins: list[str] = []
+
+    @model_validator(mode="after")
+    def require_production_credentials(self) -> "Settings":
+        """Reject placeholder or empty credentials outside debug mode."""
+        if self.debug:
+            if not self.state_service_token:
+                self.state_service_token = "dev-state-key-change-in-prod"
+            if not self.internal_api_key:
+                self.internal_api_key = "dev-internal-key-change-in-prod"
+            return self
+
+        if self.state_service_token in _DEV_PLACEHOLDERS:
+            raise ValueError(
+                "ROUTER_STATE_SERVICE_TOKEN must be set to a real secret "
+                "(not empty or dev placeholder) when ROUTER_DEBUG=false"
+            )
+        if self.internal_api_key in _DEV_PLACEHOLDERS:
+            raise ValueError(
+                "ROUTER_INTERNAL_API_KEY must be set to a real secret "
+                "(not empty or dev placeholder) when ROUTER_DEBUG=false"
+            )
+        return self
 
     @property
     def redis_url(self) -> str:

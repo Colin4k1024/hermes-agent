@@ -1,6 +1,7 @@
 """Admin endpoints for quota configuration and usage monitoring."""
 from __future__ import annotations
 
+import secrets
 from datetime import date, datetime, timezone
 from uuid import UUID
 
@@ -21,7 +22,7 @@ async def _verify_admin_key(x_admin_key: str | None = Header(None)) -> str:
     """Dependency: verify X-Admin-Key header."""
     from quota_service.config import settings
 
-    if x_admin_key is None or x_admin_key != settings.admin_api_key:
+    if x_admin_key is None or not secrets.compare_digest(x_admin_key, settings.admin_api_key):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or missing X-Admin-Key",

@@ -44,13 +44,14 @@ app = FastAPI(
     redoc_url="/redoc",
 )
 
-# CORS for Admin Console frontend (Phase 1 dev: allow all)
+# CORS — restrict origins in production
+_cors_origins = settings.cors_origins if hasattr(settings, "cors_origins") and settings.cors_origins else ([] if not settings.debug else ["http://localhost:3000"])
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_cors_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Admin-Key"],
 )
 
 # Mount routers

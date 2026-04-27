@@ -473,65 +473,50 @@ Always run the full suite before pushing changes.
 <claude-mem-context>
 # Memory Context
 
-# [hermes-agent] recent context, 2026-04-26 8:47pm GMT+8
+# [hermes-agent] recent context, 2026-04-27 1:29pm GMT+8
 
-Legend: 🎯session 🔴bugfix 🟣feature 🔄refactor ✅change 🔵discovery ⚖️decision
+Legend: 🎯session 🔴bugfix 🟣feature 🔄refactor ✅change 🔵discovery ⚖️decision 🚨security_alert 🔐security_note
 Format: ID TIME TYPE TITLE
 Fetch details: get_observations([IDs]) | Search: mem-search skill
 
-Stats: 50 obs (11,401t read) | 513,680t work | 98% savings
+Stats: 31 obs (10,411t read) | 548,681t work | 98% savings
 
-### Apr 26, 2026
-445 8:13p 🔴 Fix verified: integration tests now properly excluded from default pytest runs
-440 " 🔵 Parallel Agents Spawned to Fix Code Review Findings
-441 " 🔵 Review Finding: Missing Production Endpoint for Tenant Validation
-442 " 🔵 Review Finding: Unsanitized Path Component in Stateless Mode
-443 " 🔵 Review Finding: Weak Default Token in Production
-444 " 🔵 Review Finding: Tests Pollute Global Environment State
-446 " 🔵 Parallel Agent Fixes Timed Out Waiting
-447 " 🔵 Both integration test files are untracked new additions to the repo
-448 " 🔴 Added /state/sessions/{session_id}/metadata Endpoint
-449 " 🔴 Sanitized Route Subject in Stateless Hermes Home Path
-450 " 🔴 Required Explicit Internal API Key for Production
-451 8:14p 🔴 Fixed Integration Test Environment Pollution
-452 " 🔴 Path Traversal Fix Verified and Complete
-453 8:17p 🔵 Two Agents Still Processing After Second Timeout
-454 " 🔵 State Store and Schema Tests Pass
-455 " 🔵 Integration Tests Properly Excluded
-456 " 🔵 State Service Config Verification Requires Service Venv
-457 " 🔵 All Review Fixes Applied to Working Directory
-458 8:20p 🔴 Code review fixed 4 security and quality issues in hermes-agent
-459 8:21p 🔵 uv cache permission error blocks state-service test run
-460 " 🔴 State-service tests have dependency resolution issues
-461 " ✅ State-service dev dependencies being installed via uv extra
-462 " 🔵 State-service tests: 2 pass, 4 fail due to missing greenlet and alembic path
-463 8:22p 🔴 Fixed test infrastructure: added greenlet dep and absolute alembic paths
-464 " ✅ All 6 state-service tests now pass
-465 " ✅ Main repo unit tests pass: 6 tests for state_store and stateless_runtime_schemas
-466 8:23p 🔵 Integration test markers work correctly; redis mock fixture broken
-467 " 🔵 Router test requires redis module not installed in hermes-agent venv
-468 " 🔵 Router service has pytest version conflict in dev dependencies
-469 " 🔴 Implemented missing /state/sessions/{session_id}/metadata endpoint
-470 " ✅ Code review complete - all fixes applied and ready to commit
-471 " 🟣 Implemented /state/sessions/{session_id}/metadata endpoint for tenant validation
-472 8:24p ✅ Complete code review diff summary - 11 files changed
-473 " 🔴 Fixed session metadata isolation - same tenant multi-user collaboration
-474 " 🔴 Import pollution test confirms HERMES_STATE_MODE no longer set at import time
-475 8:25p ✅ Code review complete - 13 files modified, all tests verified
-476 8:26p ✅ Code review fixes committed to dev branch
-477 8:27p ✅ Code review fixes pushed to origin/dev
-478 " ✅ New plan: E2E testing of SaaS/State Service
-479 8:28p ✅ Starting local State Service test stack with Docker Compose
-480 " 🔵 Docker container naming conflict prevents startup
-481 8:29p 🔵 Docker permission denied in sandbox environment
-482 " 🔵 State service test stack already running
-483 " ✅ Running integration tests against live state-service
-484 " 🔵 Integration tests failing due to sandbox environment restrictions
-485 8:30p ✅ E2E smoke test passed - RemoteStateStore connects to state-service successfully
-486 " 🔴 Fixed integration test fixtures for state_service_token and hermes_home
-487 " ✅ Integration tests improved: 20 passed, 3 failed
-488 8:31p 🔵 Tenant isolation correctly implemented - metadata endpoint and _validate_tenant working
-489 8:32p ✅ ALL 23 integration tests PASSED
+### Apr 24, 2026
+921 3:54p 🔵 Hermes Agent Project Structure and Architecture
+922 4:04p ✅ CLAUDE.md created for hermes-agent project
+923 4:25p 🔵 Hermes Agent codebase architecture and development conventions
+### Apr 27, 2026
+926 8:25a ✅ hermes-agent dev branch checked out and up-to-date
+927 " 🔵 hermes-agent dev branch contains extensive SaaS and enterprise features vs main
+S131 dev 分支最新更新总结 — Summarized all changes on dev branch after switching from main (Apr 27 at 8:25 AM)
+S129 切换到 dev 分支然后拉取最新的程序 — Switch hermes-agent repo to dev branch and pull latest code (Apr 27 at 8:25 AM)
+929 8:28a ✅ Switch to dev branch and pull latest code
+930 8:30a ✅ Switch to dev branch and pull latest code
+931 8:33a 🔵 Hermes Agent SaaS State Service — 35+ Security & Data Integrity Findings
+932 " 🔵 Hermes Agent SaaS Architecture — StateStore, RuntimeContext, Router Service Design
+933 " 🔵 Hermes Agent SaaS — Phase Implementation Roadmap (NEXT-STEPS.md)
+934 8:39a 🔵 Hermes-agent SaaS audit: RemoteStateStore._request has zero retry logic
+935 " 🚨 Router service: CORS wildcard + credentials, hardcoded namespace, timing-oracle API key check
+936 " 🚨 K8s secrets contain literal REPLACE_WITH_* placeholder strings — all internal auth passes with wrong key
+937 " 🔵 Hermes-agent K8s: HPA scale-down hard-kills active agent sessions, state-service under-replicated
+938 8:40a 🔵 ROUTER_INTERNAL_API_KEY never injected anywhere in K8s manifests — confirmed absent
+939 " 🔵 Hardcoded .default.svc namespace appears in 5 locations across router service including config baseline and tests
+940 " 🔵 _validate_tenant called 5 times per agent turn — one full HTTP GET round-trip per write method
+941 8:47a ⚖️ Hermes Agent SaaS 无状态化改造 — 45 问题全量修复计划确认
+942 8:52a ⚖️ P0 Fix Task Board: C-2 _validate_tenant 缓存任务创建
+943 " ⚖️ P0 Fix Task Board: C-3 Pod URL 命名空间硬编码修复任务创建
+944 8:53a 🚨 P0 Fix Task Board: C-4 Router 硬编码默认凭据防护
+945 " 🚨 P0 Fix Task Board: C-5 K8s Secret stringData 占位符清理
+946 8:57a 🟣 RemoteStateStore._request retry logic implemented (C-1)
+949 9:39a ✅ Git branch switched to dev and pulled latest code
+950 9:45a 🔵 state-service config has production API key guard; router-service does not
+951 9:56a ✅ Switch to dev branch and pull latest code
+952 10:07a 🟣 Router service now enforces production credential guard at startup
+S146 切换到 dev 分支并拉取最新代码 — 然后继续 hermes-agent SaaS 安全审计修复工作 (Apr 27 at 10:56 AM)
+956 11:30a 🔵 Audit logging infrastructure exists in auth-service
+957 " 🔵 Audit log uses timezone-aware timestamps with UTC
+958 1:11p ✅ Hermes-agent Phase 2 continuation — P0 fix set scope confirmed via git diff
+963 1:27p 🟣 Hermes Agent SaaS化改造 PPT 方案请求
 
-Access 514k tokens of past work via get_observations([IDs]) or mem-search skill.
+Access 549k tokens of past work via get_observations([IDs]) or mem-search skill.
 </claude-mem-context>

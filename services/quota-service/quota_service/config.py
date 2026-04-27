@@ -1,7 +1,14 @@
 """Pydantic settings — all configuration via environment variables."""
 from __future__ import annotations
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_DEV_PLACEHOLDERS = frozenset({
+    "dev-admin-key-change-in-prod",
+    "dev-internal-key-change-in-prod",
+    "",
+})
 
 
 class Settings(BaseSettings):
@@ -11,6 +18,9 @@ class Settings(BaseSettings):
     host: str = "0.0.0.0"
     port: int = 8003
     debug: bool = False
+
+    # CORS allowed origins
+    cors_origins: list[str] = []
 
     # PostgreSQL
     postgres_host: str = "localhost"
@@ -41,6 +51,23 @@ class Settings(BaseSettings):
 
     # Redis key TTL for daily counters (seconds = 25 hours to cover TZ edge cases)
     daily_counter_ttl: int = 90_000
+
+    @model_validator(mode="after")
+    def require_production_credentials(self) -> "Settings":
+        """Reject placeholder or empty credentials outside debug mode."""
+        if self.debug:
+            return self
+        if self.admin_api_key in _DEV_PLACEHOLDERS:
+            raise ValueError(
+                "QUOTA_ADMIN_API_KEY must be set to a real secret "
+                "(not empty or dev placeholder) when QUOTA_DEBUG=false"
+            )
+        if self.internal_api_key in _DEV_PLACEHOLDERS:
+            raise ValueError(
+                "QUOTA_INTERNAL_API_KEY must be set to a real secret "
+                "(not empty or dev placeholder) when QUOTA_DEBUG=false"
+            )
+        return self
 
     @property
     def database_url(self) -> str:

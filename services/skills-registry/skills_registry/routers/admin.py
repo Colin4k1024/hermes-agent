@@ -1,5 +1,6 @@
 """Admin endpoints — CRUD for Skills management."""
 
+import secrets
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException, status
@@ -25,7 +26,7 @@ router = APIRouter(prefix="/admin", tags=["Admin"])
 
 async def _verify_admin_key(x_admin_key: Annotated[str | None, Header()] = None) -> None:
     """Simple API-key check for admin endpoints (Phase 1 placeholder)."""
-    if x_admin_key != settings.admin_api_key:
+    if not secrets.compare_digest(x_admin_key, settings.admin_api_key):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or missing X-Admin-Key header",

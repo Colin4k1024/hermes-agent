@@ -1,6 +1,13 @@
 """Configuration for Skills Registry Service."""
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_DEV_PLACEHOLDERS = frozenset({
+    "dev-admin-key-change-in-prod",
+    "dev-secret-change-in-prod",
+    "",
+})
 
 
 class Settings(BaseSettings):
@@ -17,6 +24,9 @@ class Settings(BaseSettings):
     host: str = "0.0.0.0"
     port: int = 8004
     debug: bool = False
+
+    # CORS allowed origins
+    cors_origins: list[str] = []
 
     # PostgreSQL
     postgres_host: str = "localhost"
@@ -48,7 +58,28 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
 
     # Admin API auth
-    admin_api_key: str = "dev-admin-key-change-in-prod"
+    admin_api_key: str = ""
+
+    @model_validator(mode="after")
+    def require_production_credentials(self) -> "Settings":
+        """Reject placeholder or empty credentials outside debug mode."""
+        if self.debug:
+            if not self.admin_api_key:
+                self.admin_api_key = "dev-admin-key-change-in-prod"
+            if not self.jwt_secret:
+                self.jwt_secret = "dev-secret-change-in-prod"
+            return self
+        if self.admin_api_key in _DEV_PLACEHOLDERS:
+            raise ValueError(
+                "SKILLS_REGISTRY_ADMIN_API_KEY must be set to a real secret "
+                "(not empty or dev placeholder) when SKILLS_REGISTRY_DEBUG=false"
+            )
+        if self.jwt_secret in _DEV_PLACEHOLDERS:
+            raise ValueError(
+                "SKILLS_REGISTRY_JWT_SECRET must be set to a real secret "
+                "(not empty or dev placeholder) when SKILLS_REGISTRY_DEBUG=false"
+            )
+        return self
 
     @property
     def database_url(self) -> str:

@@ -16,6 +16,7 @@ data:
   REDIS_DB: "0"
   AUTH_SERVICE_URL: "http://auth-service.hermes-platform.svc.cluster.local:8001"
   QUOTA_SERVICE_URL: "http://quota-service.hermes-platform.svc.cluster.local:8003"
+  ROUTER_POD_NAMESPACE: "hermes-platform"
   ROUTER_STATELESS_RUNTIME: "true"
   ROUTER_STATE_SERVICE_URL: "http://state-service.hermes-platform.svc.cluster.local:8006"
   LITELLM_PROXY_URL: "http://litellm-service.hermes-platform.svc.cluster.local:4000"
